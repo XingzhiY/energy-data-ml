@@ -18,11 +18,32 @@ def load_and_prepare_data(file_path):
     
     # 选择相关特征
     selected_features = [
-        'country', 'year', 'gdp', 'population',
+        # 基础标识
+        'country', 'year', 'iso_code',
+        
+        # 经济人口
+        'gdp', 'population',
+        
+        # 能源结构
         'renewables_share_energy',          
-        'energy_per_capita',                
-        'energy_per_gdp',                   
-        'greenhouse_gas_emissions'         
+        'fossil_share_energy',
+        'low_carbon_share_energy',
+        'coal_share_energy',
+        'oil_share_energy',
+        
+        # 环境效应
+        'carbon_intensity_elec',
+        'greenhouse_gas_emissions',
+        
+        # 电力特征
+        'electricity_demand_per_capita',
+        'renewables_elec_per_capita',
+        'solar_share_elec',
+        'wind_share_elec',
+        'nuclear_share_elec',
+        
+        # 经济效率
+        'energy_per_gdp'
     ]
     
     # 只选择存在的列
@@ -32,12 +53,18 @@ def load_and_prepare_data(file_path):
     # 将无穷大值替换为NaN
     df = df.replace([np.inf, -np.inf], np.nan)
     
-    # 创建滞后特征（修改方式）
+    # 添加时序特征
     for i in range(1, 6):
         df[f'renewable_share_lag_{i}'] = df.groupby('country')['renewables_share_energy'].shift(i)
     
+    # 计算化石能源消费变化率
+    df['fossil_cons_change_pct'] = df.groupby('country')['fossil_share_energy'].transform(
+        lambda x: x.pct_change(fill_method=None)
+    )
+    
     # 添加政策相关特征
     df['paris_agreement'] = (df['year'] >= 2015).astype(int)
+    
     
     # 安全地计算年度变化率（修改这部分代码）
     df['renewable_growth'] = df.groupby('country')['renewables_share_energy'].transform(
@@ -58,8 +85,11 @@ def prepare_features(df):
     """特征工程"""
     # 标准化数值特征前检查无穷大值
     numeric_features = [
-        'gdp', 'population', 'energy_per_capita', 'energy_per_gdp',
-        'greenhouse_gas_emissions'
+        'gdp', 'population', 
+        'carbon_intensity_elec', 'greenhouse_gas_emissions',
+        'electricity_demand_per_capita', 'renewables_elec_per_capita',
+        'energy_per_gdp',
+        'fossil_cons_change_pct'
     ]
     
     # 只选择存在的特征
@@ -79,12 +109,15 @@ def prepare_features(df):
 
 def train_model(df, target_years=5):
     """训练随机森林模型"""
-    # 准备特征
+    # 准备特征，排除非数值列
     feature_columns = [col for col in df.columns 
-                      if col not in ['country', 'year', 'renewables_share_energy']]
+                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     
-    X = df[feature_columns]
+    # 确保所有特征都是数值类型
+    numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
+    X = df[numeric_features]
     y = df['renewables_share_energy']
+
     
     # 确保没有无穷大值
     X = X.replace([np.inf, -np.inf], np.nan)
@@ -130,6 +163,11 @@ def predict_future(model, df, country, years_to_predict=5):
     latest_data = df[df['country'] == country].iloc[-1:].copy()
     predictions = []
     
+    # 获取训练模型时使用的特征（数值类型特征）
+    feature_columns = [col for col in df.columns 
+                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
+    numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
+    
     for i in range(years_to_predict):
         # 更新年份
         latest_data['year'] = latest_data['year'] + 1
@@ -141,9 +179,8 @@ def predict_future(model, df, country, years_to_predict=5):
             else:
                 latest_data[f'renewable_share_lag_{j}'] = latest_data[f'renewable_share_lag_{j-1}']
         
-        # 预测
-        features = [col for col in df.columns if col not in ['country', 'year', 'renewables_share_energy']]
-        pred = model.predict(latest_data[features])
+        # 预测（使用与训练时相同的特征集）
+        pred = model.predict(latest_data[numeric_features])
         predictions.append(pred[0])
     
     return predictions
