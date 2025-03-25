@@ -53,6 +53,10 @@ def load_and_prepare_data(file_path):
     # 将无穷大值替换为NaN
     df = df.replace([np.inf, -np.inf], np.nan)
     
+    # 输出初始数据
+    df.to_csv('1_data_initial.csv', index=False)
+    print("初始数据已保存到 1_data_initial.csv")
+    
     # 添加时序特征
     for i in range(1, 6):
         df[f'renewable_share_lag_{i}'] = df.groupby('country')['renewables_share_energy'].shift(i)
@@ -65,8 +69,7 @@ def load_and_prepare_data(file_path):
     # 添加政策相关特征
     df['paris_agreement'] = (df['year'] >= 2015).astype(int)
     
-    
-    # 安全地计算年度变化率（修改这部分代码）
+    # 安全地计算年度变化率
     df['renewable_growth'] = df.groupby('country')['renewables_share_energy'].transform(
         lambda x: x.pct_change(fill_method=None)
     )
@@ -78,6 +81,10 @@ def load_and_prepare_data(file_path):
     
     # 确保数据按国家和年份排序
     df = df.sort_values(['country', 'year'])
+    
+    # 输出特征工程后的数据
+    df.to_csv('2_data_after_feature_engineering.csv', index=False)
+    print("特征工程后的数据已保存到 2_data_after_feature_engineering.csv")
     
     return df
 
@@ -101,9 +108,17 @@ def prepare_features(df):
         q3 = df[feature].quantile(0.99)
         df[feature] = df[feature].clip(q1, q3)
     
+    # 输出处理极端值后的数据
+    df.to_csv('3_data_after_outlier_handling.csv', index=False)
+    print("处理极端值后的数据已保存到 3_data_after_outlier_handling.csv")
+    
     # 标准化
     scaler = StandardScaler()
     df[numeric_features] = scaler.fit_transform(df[numeric_features])
+    
+    # 输出标准化后的数据
+    df.to_csv('4_data_after_scaling.csv', index=False)
+    print("标准化后的数据已保存到 4_data_after_scaling.csv")
     
     return df
 
@@ -117,16 +132,24 @@ def train_model(df, target_years=5):
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
     X = df[numeric_features]
     y = df['renewables_share_energy']
-
     
     # 确保没有无穷大值
     X = X.replace([np.inf, -np.inf], np.nan)
     X = X.fillna(X.median())
     
+    # 输出最终用于训练的数据
+    X.to_csv('5_data_final_for_training.csv', index=False)
+    print("最终用于训练的数据已保存到 5_data_final_for_training.csv")
+    
     # 分割训练集和测试集
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
+    
+    # 输出训练集和测试集
+    X_train.to_csv('6_data_train.csv', index=False)
+    X_test.to_csv('7_data_test.csv', index=False)
+    print("训练集和测试集已分别保存到 6_data_train.csv 和 7_data_test.csv")
     
     # 训练模型（添加参数控制）
     model = RandomForestRegressor(
