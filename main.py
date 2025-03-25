@@ -11,6 +11,10 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# 设置matplotlib中文字体
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']  # Mac系统
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
 def fill_missing_by_country(df, columns):
     """
     按国家分别填充缺失值
@@ -43,6 +47,137 @@ def fill_missing_by_country(df, columns):
                 df_filled.loc[country_mask, col] = global_median
     
     return df_filled
+
+def filter_early_missing_data(df, missing_threshold=0.3):
+    """
+    过滤掉每个国家早期数据严重缺失的年份
+    
+    Args:
+        df: 数据框
+        missing_threshold: 缺失值比例阈值，超过此阈值的年份将被过滤
+    
+    Returns:
+        过滤后的数据框
+    """
+    # 获取所有数值列
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    
+    # 存储每个国家的起始年份
+    country_start_years = {}
+    
+    for country in df['country'].unique():
+        country_data = df[df['country'] == country].copy()
+        
+        # 按年份计算缺失值比例
+        missing_by_year = country_data[numeric_columns].isna().mean(axis=1)
+        
+        # 找到第一个缺失值比例低于阈值的年份
+        valid_years = missing_by_year[missing_by_year < missing_threshold].index
+        if len(valid_years) > 0:
+            start_year = country_data.loc[valid_years[0], 'year']
+            country_start_years[country] = start_year
+        else:
+            # 如果所有年份都超过阈值，使用数据中最早的年份
+            country_start_years[country] = country_data['year'].min()
+    
+    # 过滤数据
+    filtered_data = []
+    for country in df['country'].unique():
+        country_data = df[df['country'] == country].copy()
+        start_year = country_start_years[country]
+        filtered_country_data = country_data[country_data['year'] >= start_year]
+        filtered_data.append(filtered_country_data)
+    
+    # 合并所有过滤后的数据
+    df_filtered = pd.concat(filtered_data, ignore_index=True)
+    
+    # 输出过滤信息
+    print("\n数据过滤信息:")
+    for country in df['country'].unique():
+        original_years = df[df['country'] == country]['year'].nunique()
+        filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
+        print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years}")
+    
+    return df_filtered
+
+def analyze_data_quality(df):
+    """
+    分析数据质量并筛选出数据质量较好的国家
+    
+    Args:
+        df: 数据框
+    
+    Returns:
+        筛选后的数据框
+    """
+    # 获取所有数值列
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    
+    # 计算每个国家的数据质量指标
+    country_quality = {}
+    
+    for country in df['country'].unique():
+        country_data = df[df['country'] == country]
+        
+        # 计算缺失值比例
+        missing_ratio = country_data[numeric_columns].isna().mean().mean()
+        
+        # 计算数据时间跨度
+        year_span = country_data['year'].max() - country_data['year'].min()
+        
+        # 计算数据点数量
+        data_points = len(country_data)
+        
+        # 计算关键指标的缺失情况
+        key_indicators = ['renewables_share_energy', 'gdp', 'population', 'carbon_intensity_elec']
+        key_missing_ratio = country_data[key_indicators].isna().mean().mean()
+        
+        country_quality[country] = {
+            'missing_ratio': missing_ratio,
+            'year_span': year_span,
+            'data_points': data_points,
+            'key_missing_ratio': key_missing_ratio
+        }
+    
+    # 转换为DataFrame
+    quality_df = pd.DataFrame.from_dict(country_quality, orient='index')
+    
+    # 设置筛选条件
+    quality_thresholds = {
+        'missing_ratio': 0.2,  # 总体缺失值比例不超过20%（因为已经过滤了早期数据）
+        'year_span': 10,       # 至少10年的数据
+        'data_points': 10,     # 至少10个数据点
+        'key_missing_ratio': 0.15  # 关键指标缺失值比例不超过15%
+    }
+    
+    # 筛选出满足条件的国家
+    good_countries = quality_df[
+        (quality_df['missing_ratio'] <= quality_thresholds['missing_ratio']) &
+        (quality_df['year_span'] >= quality_thresholds['year_span']) &
+        (quality_df['data_points'] >= quality_thresholds['data_points']) &
+        (quality_df['key_missing_ratio'] <= quality_thresholds['key_missing_ratio'])
+    ].index
+    
+    # 输出数据质量分析结果
+    print("\n数据质量分析结果:")
+    print(f"总国家数: {len(df['country'].unique())}")
+    print(f"满足质量要求的国家数: {len(good_countries)}")
+    print("\n被排除的国家及其原因:")
+    excluded_countries = set(df['country'].unique()) - set(good_countries)
+    for country in excluded_countries:
+        print(f"\n{country}:")
+        for metric, threshold in quality_thresholds.items():
+            if quality_df.loc[country, metric] > threshold:
+                print(f"- {metric}: {quality_df.loc[country, metric]:.2f} (阈值: {threshold})")
+    
+    # 筛选数据
+    df_filtered = df[df['country'].isin(good_countries)].copy()
+    
+    # 输出筛选后的数据
+    df_filtered.to_csv('2_data_after_quality_filter.csv', index=False)
+    print("\n筛选后的数据已保存到 2_data_after_quality_filter.csv")
+    
+    return df_filtered
 
 def load_and_prepare_data(file_path):
     """加载并预处理数据"""
@@ -86,9 +221,19 @@ def load_and_prepare_data(file_path):
     # 将无穷大值替换为NaN
     df = df.replace([np.inf, -np.inf], np.nan)
     
-    # 输出初始数据
-    df.to_csv('1_data_initial.csv', index=False)
-    print("初始数据已保存到 1_data_initial.csv")
+    # 输出原始数据
+    df.to_csv('0_data_raw.csv', index=False)
+    print("原始数据已保存到 0_data_raw.csv")
+    
+    # 第一步：过滤每个国家早期严重缺失数据的年份
+    print("\n开始过滤早期严重缺失数据的年份...")
+    df = filter_early_missing_data(df)
+    df.to_csv('1_data_after_early_filter.csv', index=False)
+    print("过滤早期缺失数据后的数据已保存到 1_data_after_early_filter.csv")
+    
+    # 第二步：分析数据质量并筛选出数据质量较好的国家
+    print("\n开始分析数据质量并筛选国家...")
+    df = analyze_data_quality(df)
     
     # 添加时序特征
     for i in range(1, 6):
@@ -107,23 +252,16 @@ def load_and_prepare_data(file_path):
         lambda x: x.pct_change(fill_method=None)
     )
     
+    return df
+
+def prepare_features(df):
+    """特征工程"""
     # 获取所有数值列
     numeric_columns = df.select_dtypes(include=[np.number]).columns
     
     # 按国家分别填充缺失值
     df = fill_missing_by_country(df, numeric_columns)
     
-    # 确保数据按国家和年份排序
-    df = df.sort_values(['country', 'year'])
-    
-    # 输出特征工程后的数据
-    df.to_csv('2_data_after_feature_engineering.csv', index=False)
-    print("特征工程后的数据已保存到 2_data_after_feature_engineering.csv")
-    
-    return df
-
-def prepare_features(df):
-    """特征工程"""
     # 标准化数值特征前检查无穷大值
     numeric_features = [
         'gdp', 'population', 
@@ -209,9 +347,11 @@ def train_model(df, test_years=5):
     # 训练模型
     model = RandomForestRegressor(
         n_estimators=100,
-        max_depth=10,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        max_depth=5,  # 降低树的深度，防止过拟合
+        min_samples_split=10,  # 增加分裂所需的最小样本数
+        min_samples_leaf=5,  # 增加叶节点所需的最小样本数
+        max_features='sqrt',  # 使用sqrt(n_features)个特征进行分裂
+        bootstrap=True,  # 使用bootstrap采样
         random_state=42,
         n_jobs=-1
     )
@@ -232,7 +372,7 @@ def train_model(df, test_years=5):
     
     for country in countries:
         country_mask_test = (df['country'] == country) & test_mask
-        if sum(country_mask_test) > 0:  # 确保该国家在测试集中有数据
+        if sum(country_mask_test) > 1:  # 确保该国家在测试集中至少有2个数据点
             X_test_country = X[country_mask_test]
             y_test_country = y[country_mask_test]
             score = model.score(X_test_country, y_test_country)
@@ -286,9 +426,11 @@ def evaluate_with_time_series_cv(df, n_splits=5):
     # 初始化模型
     model = RandomForestRegressor(
         n_estimators=100,
-        max_depth=10,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        max_depth=5,  # 降低树的深度，防止过拟合
+        min_samples_split=10,  # 增加分裂所需的最小样本数
+        min_samples_leaf=5,  # 增加叶节点所需的最小样本数
+        max_features='sqrt',  # 使用sqrt(n_features)个特征进行分裂
+        bootstrap=True,  # 使用bootstrap采样
         random_state=42,
         n_jobs=-1
     )
@@ -302,10 +444,14 @@ def evaluate_with_time_series_cv(df, n_splits=5):
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
         
         try:
-            model.fit(X_train, y_train)
-            score = model.score(X_test, y_test)
-            cv_scores.append(score)
-            print(f"Fold {fold} R² 分数: {score:.3f}")
+            # 确保训练集和测试集都有足够的样本
+            if len(X_train) > 1 and len(X_test) > 1:
+                model.fit(X_train, y_train)
+                score = model.score(X_test, y_test)
+                cv_scores.append(score)
+                print(f"Fold {fold} R² 分数: {score:.3f}")
+            else:
+                print(f"Fold {fold} 样本数量不足，跳过")
         except Exception as e:
             print(f"Fold {fold} 训练失败: {str(e)}")
             continue
@@ -358,16 +504,16 @@ def plot_predictions(country, historical_data, predictions, future_years):
     
     # 绘制历史数据
     plt.plot(historical_data['year'], historical_data['renewables_share_energy'], 
-             label='历史数据', marker='o')
+             label='Historical Data', marker='o')
     
     # 绘制预测数据
     future_years = range(historical_data['year'].max() + 1, 
                         historical_data['year'].max() + len(predictions) + 1)
-    plt.plot(future_years, predictions, label='预测数据', marker='s', linestyle='--')
+    plt.plot(future_years, predictions, label='Prediction', marker='s', linestyle='--')
     
-    plt.title(f'{country}可再生能源占比预测')
-    plt.xlabel('年份')
-    plt.ylabel('可再生能源占比 (%)')
+    plt.title(f'Renewable Energy Share Prediction - {country}')
+    plt.xlabel('Year')
+    plt.ylabel('Renewable Energy Share (%)')
     plt.legend()
     plt.grid(True)
     
@@ -376,6 +522,12 @@ def plot_predictions(country, historical_data, predictions, future_years):
 def main():
     # 加载数据
     df = load_and_prepare_data('owid-energy-data.csv')
+    
+    # 分析数据质量并筛选国家
+    print("\n开始数据质量分析...")
+    df = analyze_data_quality(df)
+    
+    # 特征工程
     df = prepare_features(df)
     
     # 使用时间序列交叉验证评估模型
