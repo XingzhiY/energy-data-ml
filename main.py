@@ -100,15 +100,15 @@ def filter_early_missing_data(df, missing_threshold=0.3):
     df_filtered = pd.concat(filtered_data, ignore_index=True)
     
     # 输出过滤信息
-    print("\n数据过滤信息:")
-    for country in df['country'].unique():
-        original_years = df[df['country'] == country]['year'].nunique()
-        if country_start_years[country] is not None:
-            filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
-            start_year = country_start_years[country]
-            print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years} (起始年份: {start_year})")
-        else:
-            print(f"{country}: 原始年份数 {original_years} -> 已删除 (未找到连续5年数据质量合格的起始年份)")
+    # print("\n数据过滤信息:")
+    # for country in df['country'].unique():
+    #     original_years = df[df['country'] == country]['year'].nunique()
+    #     if country_start_years[country] is not None:
+    #         filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
+    #         start_year = country_start_years[country]
+    #         print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years} (起始年份: {start_year})")
+    #     else:
+    #         print(f"{country}: 原始年份数 {original_years} -> 已删除 (未找到连续5年数据质量合格的起始年份)")
     
     return df_filtered
 
@@ -421,10 +421,17 @@ def train_model(df, test_years=5):
     country_scores = {}
     
     for country in countries:
+        # 获取该国家在测试集中的数据
         country_mask_test = (df['country'] == country) & test_mask
-        if sum(country_mask_test) > 1:  # 确保该国家在测试集中至少有2个数据点
+        country_test_data = df[country_mask_test]
+        
+        # 确保该国家在测试集中有足够的数据点（至少3年）
+        if len(country_test_data) >= 3:
+            # 使用该国家在测试集中的数据进行预测
             X_test_country = X[country_mask_test]
             y_test_country = y[country_mask_test]
+            
+            # 计算该国家的R²分数
             score = model.score(X_test_country, y_test_country)
             country_scores[country] = score
     
@@ -433,7 +440,7 @@ def train_model(df, test_years=5):
     for country, score in sorted(country_scores.items(), key=lambda x: x[1], reverse=True):
         print(f"{country}: {score:.3f}")
     
-    return model, X_train, X_test, y_train, y_test, country_scores
+    return model, X_train, X_test, y_train, y_test, country_scores, test_mask
 
 def evaluate_with_time_series_cv(df, n_splits=5):
     """
@@ -523,28 +530,45 @@ def analyze_feature_importance(model, feature_names):
 
 def predict_future(model, df, country, years_to_predict=5):
     """预测特定国家的未来趋势"""
-    latest_data = df[df['country'] == country].iloc[-1:].copy()
-    predictions = []
+    # 获取该国家的最新数据
+    country_data = df[df['country'] == country].copy()
+    latest_data = country_data.iloc[-1:].copy()
     
     # 获取训练模型时使用的特征（数值类型特征）
     feature_columns = [col for col in df.columns 
                       if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
     
+    predictions = []
+    current_data = latest_data.copy()
+    
+    # 计算历史趋势
+    historical_trend = country_data['renewables_share_energy'].pct_change().mean()
+    
     for i in range(years_to_predict):
         # 更新年份
-        latest_data['year'] = latest_data['year'] + 1
+        current_data['year'] = current_data['year'] + 1
         
         # 更新滞后特征
         for j in range(5, 0, -1):
             if j == 1:
-                latest_data[f'renewable_share_lag_{j}'] = predictions[-1] if predictions else latest_data['renewables_share_energy'].values[0]
+                # 使用历史趋势来调整预测值
+                if predictions:
+                    current_data[f'renewable_share_lag_{j}'] = predictions[-1] * (1 + historical_trend)
+                else:
+                    current_data[f'renewable_share_lag_{j}'] = current_data['renewables_share_energy'].values[0]
             else:
-                latest_data[f'renewable_share_lag_{j}'] = latest_data[f'renewable_share_lag_{j-1}']
+                current_data[f'renewable_share_lag_{j}'] = current_data[f'renewable_share_lag_{j-1}']
         
-        # 预测（使用与训练时相同的特征集）
-        pred = model.predict(latest_data[numeric_features])
-        predictions.append(pred[0])
+        # 预测
+        pred = model.predict(current_data[numeric_features])[0]
+        
+        # 确保预测值在合理范围内
+        last_value = predictions[-1] if predictions else current_data['renewables_share_energy'].values[0]
+        max_change = 0.1  # 最大允许变化率（10%）
+        pred = np.clip(pred, last_value * (1 - max_change), last_value * (1 + max_change))
+        
+        predictions.append(pred)
     
     return predictions
 
@@ -569,6 +593,47 @@ def plot_predictions(country, historical_data, predictions, future_years):
     
     return plt
 
+def plot_test_predictions(model, df, country, test_mask):
+    """绘制测试集上的预测效果对比图"""
+    # 获取该国家在测试集上的数据
+    country_mask = (df['country'] == country) & test_mask
+    country_test_data = df[country_mask]
+    
+    if len(country_test_data) < 3:
+        return None
+    
+    # 准备特征
+    feature_columns = [col for col in df.columns 
+                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
+    numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
+    
+    # 获取测试集上的预测值
+    X_test_country = df[country_mask][numeric_features]
+    y_true = df[country_mask]['renewables_share_energy']
+    y_pred = model.predict(X_test_country)
+    
+    # 创建图表
+    plt.figure(figsize=(12, 6))
+    
+    # 绘制实际值
+    plt.plot(country_test_data['year'], y_true, 
+             label='实际值', marker='o', color='blue')
+    
+    # 绘制预测值
+    plt.plot(country_test_data['year'], y_pred, 
+             label='预测值', marker='s', color='red', linestyle='--')
+    
+    # 计算R²分数
+    r2_score = model.score(X_test_country, y_true)
+    
+    plt.title(f'{country} 测试集预测效果对比 (R² = {r2_score:.3f})')
+    plt.xlabel('年份')
+    plt.ylabel('可再生能源占比 (%)')
+    plt.legend()
+    plt.grid(True)
+    
+    return plt
+
 def main():
     # 加载数据
     df = load_and_prepare_data('owid-energy-data.csv')
@@ -586,7 +651,7 @@ def main():
     
     # 训练最终模型
     print("\n训练最终模型...")
-    model, X_train, X_test, y_train, y_test, country_scores = train_model(df, test_years=5)
+    model, X_train, X_test, y_train, y_test, country_scores, test_mask = train_model(df, test_years=5)
     
     # 输出整体模型性能
     train_score = model.score(X_train, y_train)
@@ -600,21 +665,33 @@ def main():
     print("\n特征重要性:")
     print(importance)
     
-    # 为几个主要国家进行预测
-    main_countries = ['China', 'United States', 'India', 'Germany', 'Japan']
-    for country in main_countries:
-        if country in df['country'].unique():
-            predictions = predict_future(model, df, country, years_to_predict=10)
-            historical_data = df[df['country'] == country]
-            
-            print(f"\n{country}未来10年可再生能源占比预测:")
-            for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
-                print(f"{year}年: {pred:.2f}%")
-            
-            # 绘制预测图表
-            plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
-            plt.savefig(f'prediction_{country}.png')
+    # 获取R²分数最高的五个国家
+    top_countries = sorted(country_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+    print("\nR²分数最高的五个国家:")
+    for country, score in top_countries:
+        print(f"{country}: {score:.3f}")
+    
+    # 为R²分数最高的五个国家绘制测试集预测效果对比图
+    print("\n绘制测试集预测效果对比图...")
+    for country, score in top_countries:
+        plt = plot_test_predictions(model, df, country, test_mask)
+        if plt is not None:
+            plt.savefig(f'test_prediction_{country}.png')
             plt.close()
+    
+    # 为R²分数最高的五个国家进行未来预测
+    for country, score in top_countries:
+        predictions = predict_future(model, df, country, years_to_predict=10)
+        historical_data = df[df['country'] == country]
+        
+        print(f"\n{country}未来10年可再生能源占比预测:")
+        for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
+            print(f"{year}年: {pred:.2f}%")
+        
+        # 绘制预测图表
+        plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
+        plt.savefig(f'prediction_{country}.png')
+        plt.close()
 
 if __name__ == "__main__":
     main()
