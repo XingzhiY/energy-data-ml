@@ -11,6 +11,39 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+def fill_missing_by_country(df, columns):
+    """
+    按国家分别填充缺失值
+    
+    Args:
+        df: 数据框
+        columns: 需要填充的列名列表
+    
+    Returns:
+        填充后的数据框
+    """
+    df_filled = df.copy()
+    
+    # 对每个国家分别处理
+    for country in df['country'].unique():
+        country_mask = df['country'] == country
+        
+        # 对每个数值列进行处理
+        for col in columns:
+            # 获取该国家该列的数据
+            country_data = df.loc[country_mask, col]
+            
+            # 如果该国家有非空值，使用该国家的中位数填充
+            if not country_data.isna().all():
+                median_value = country_data.median()
+                df_filled.loc[country_mask, col] = country_data.fillna(median_value)
+            else:
+                # 如果该国家所有值都是空的，使用全球中位数填充
+                global_median = df[col].median()
+                df_filled.loc[country_mask, col] = global_median
+    
+    return df_filled
+
 def load_and_prepare_data(file_path):
     """加载并预处理数据"""
     # 读取数据
@@ -74,10 +107,11 @@ def load_and_prepare_data(file_path):
         lambda x: x.pct_change(fill_method=None)
     )
     
-    # 使用中位数填充NaN值
+    # 获取所有数值列
     numeric_columns = df.select_dtypes(include=[np.number]).columns
-    for col in numeric_columns:
-        df[col] = df[col].fillna(df[col].median())
+    
+    # 按国家分别填充缺失值
+    df = fill_missing_by_country(df, numeric_columns)
     
     # 确保数据按国家和年份排序
     df = df.sort_values(['country', 'year'])
@@ -122,39 +156,60 @@ def prepare_features(df):
     
     return df
 
-def train_model(df, target_years=5):
-    """训练随机森林模型"""
+def train_model(df, test_years=5):
+    """
+    训练随机森林模型，使用时间序列划分方法
+    
+    Args:
+        df: 数据框
+        test_years: 用作测试的年份数量
+    """
     # 准备特征，排除非数值列
     feature_columns = [col for col in df.columns 
                       if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     
     # 确保所有特征都是数值类型
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
+    
+    # 按时间划分训练集和测试集
+    cutoff_year = df['year'].max() - test_years
+    
+    # 训练集：所有早于cutoff_year的数据
+    train_mask = df['year'] <= cutoff_year
+    # 测试集：所有晚于cutoff_year的数据
+    test_mask = df['year'] > cutoff_year
+    
+    # 准备特征矩阵
     X = df[numeric_features]
     y = df['renewables_share_energy']
     
     # 确保没有无穷大值
     X = X.replace([np.inf, -np.inf], np.nan)
-    X = X.fillna(X.median())
+    
+    # 按国家分别填充缺失值
+    X = fill_missing_by_country(pd.concat([df[['country']], X], axis=1), numeric_features)[numeric_features]
+    
+    # 划分训练集和测试集
+    X_train = X[train_mask]
+    X_test = X[test_mask]
+    y_train = y[train_mask]
+    y_test = y[test_mask]
+    
+    # 输出训练集和测试集的时间范围
+    print(f"训练集时间范围：{df[train_mask]['year'].min()} - {df[train_mask]['year'].max()}")
+    print(f"测试集时间范围：{df[test_mask]['year'].min()} - {df[test_mask]['year'].max()}")
     
     # 输出最终用于训练的数据
-    X.to_csv('5_data_final_for_training.csv', index=False)
-    print("最终用于训练的数据已保存到 5_data_final_for_training.csv")
+    train_df = pd.concat([X_train, y_train], axis=1)
+    test_df = pd.concat([X_test, y_test], axis=1)
+    train_df.to_csv('6_data_train_time_series.csv', index=False)
+    test_df.to_csv('7_data_test_time_series.csv', index=False)
+    print("最终用于训练的数据已保存到 6_data_train_time_series.csv 和 7_data_test_time_series.csv")
     
-    # 分割训练集和测试集
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-    
-    # 输出训练集和测试集
-    X_train.to_csv('6_data_train.csv', index=False)
-    X_test.to_csv('7_data_test.csv', index=False)
-    print("训练集和测试集已分别保存到 6_data_train.csv 和 7_data_test.csv")
-    
-    # 训练模型（添加参数控制）
+    # 训练模型
     model = RandomForestRegressor(
-        n_estimators=100,  # 减少树的数量以提高稳定性
-        max_depth=10,      # 限制树的深度
+        n_estimators=100,
+        max_depth=10,
         min_samples_split=5,
         min_samples_leaf=2,
         random_state=42,
@@ -171,7 +226,96 @@ def train_model(df, target_years=5):
             print(f"{col}: 范围 [{X_train[col].min()}, {X_train[col].max()}]")
         raise
     
-    return model, X_train, X_test, y_train, y_test
+    # 计算每个国家的预测性能
+    countries = df['country'].unique()
+    country_scores = {}
+    
+    for country in countries:
+        country_mask_test = (df['country'] == country) & test_mask
+        if sum(country_mask_test) > 0:  # 确保该国家在测试集中有数据
+            X_test_country = X[country_mask_test]
+            y_test_country = y[country_mask_test]
+            score = model.score(X_test_country, y_test_country)
+            country_scores[country] = score
+    
+    # 输出每个国家的预测性能
+    print("\n各国预测性能 (R² 分数):")
+    for country, score in sorted(country_scores.items(), key=lambda x: x[1], reverse=True):
+        print(f"{country}: {score:.3f}")
+    
+    return model, X_train, X_test, y_train, y_test, country_scores
+
+def evaluate_with_time_series_cv(df, n_splits=5):
+    """
+    使用时间序列交叉验证评估模型
+    
+    Args:
+        df: 数据框
+        n_splits: 交叉验证折数
+    """
+    from sklearn.model_selection import TimeSeriesSplit
+    
+    # 准备特征
+    feature_columns = [col for col in df.columns 
+                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
+    numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
+    
+    X = df[numeric_features]
+    y = df['renewables_share_energy']
+    
+    # 处理无穷大值和异常值
+    X = X.replace([np.inf, -np.inf], np.nan)
+    
+    # 按国家分别填充缺失值
+    X = fill_missing_by_country(pd.concat([df[['country']], X], axis=1), numeric_features)[numeric_features]
+    
+    # 对每一列分别处理异常值
+    for col in X.columns:
+        # 计算分位数
+        q1 = X[col].quantile(0.01)
+        q3 = X[col].quantile(0.99)
+        # 将超出范围的值限制在分位数范围内
+        X[col] = X[col].clip(q1, q3)
+    
+    # 确保所有值都是有限的
+    assert np.all(np.isfinite(X)), "数据中仍然存在无穷大值"
+    
+    # 初始化时间序列交叉验证
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    
+    # 初始化模型
+    model = RandomForestRegressor(
+        n_estimators=100,
+        max_depth=10,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    # 存储每次交叉验证的分数
+    cv_scores = []
+    
+    # 进行交叉验证
+    for fold, (train_index, test_index) in enumerate(tscv.split(X), 1):
+        X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+        
+        try:
+            model.fit(X_train, y_train)
+            score = model.score(X_test, y_test)
+            cv_scores.append(score)
+            print(f"Fold {fold} R² 分数: {score:.3f}")
+        except Exception as e:
+            print(f"Fold {fold} 训练失败: {str(e)}")
+            continue
+    
+    if cv_scores:
+        print(f"\n平均 R² 分数: {np.mean(cv_scores):.3f} (+/- {np.std(cv_scores):.3f})")
+    else:
+        print("所有折都训练失败")
+    
+    return cv_scores
 
 def analyze_feature_importance(model, feature_names):
     """分析特征重要性"""
@@ -234,12 +378,18 @@ def main():
     df = load_and_prepare_data('owid-energy-data.csv')
     df = prepare_features(df)
     
-    # 训练模型
-    model, X_train, X_test, y_train, y_test = train_model(df)
+    # 使用时间序列交叉验证评估模型
+    print("\n执行时间序列交叉验证...")
+    cv_scores = evaluate_with_time_series_cv(df)
     
-    # 输出模型性能
+    # 训练最终模型
+    print("\n训练最终模型...")
+    model, X_train, X_test, y_train, y_test, country_scores = train_model(df, test_years=5)
+    
+    # 输出整体模型性能
     train_score = model.score(X_train, y_train)
     test_score = model.score(X_test, y_test)
+    print(f"\n整体模型性能:")
     print(f"训练集 R2 分数: {train_score:.3f}")
     print(f"测试集 R2 分数: {test_score:.3f}")
     
@@ -248,19 +398,21 @@ def main():
     print("\n特征重要性:")
     print(importance)
     
-    # 预测示例（中国）
-    country = 'China'
-    predictions = predict_future(model, df, country, years_to_predict=10)
-    historical_data = df[df['country'] == country]
-    
-    # 输出预测结果
-    print(f"\n{country}未来10年可再生能源占比预测:")
-    for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
-        print(f"{year}年: {pred:.2f}%")
-    
-    # 绘制预测图表
-    plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
-    plt.show()
+    # 为几个主要国家进行预测
+    main_countries = ['China', 'United States', 'India', 'Germany', 'Japan']
+    for country in main_countries:
+        if country in df['country'].unique():
+            predictions = predict_future(model, df, country, years_to_predict=10)
+            historical_data = df[df['country'] == country]
+            
+            print(f"\n{country}未来10年可再生能源占比预测:")
+            for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
+                print(f"{year}年: {pred:.2f}%")
+            
+            # 绘制预测图表
+            plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
+            plt.savefig(f'prediction_{country}.png')
+            plt.close()
 
 if __name__ == "__main__":
     main()
