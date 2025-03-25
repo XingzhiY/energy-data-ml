@@ -71,22 +71,30 @@ def filter_early_missing_data(df, missing_threshold=0.3):
         # 按年份计算缺失值比例
         missing_by_year = country_data[numeric_columns].isna().mean(axis=1)
         
-        # 找到第一个缺失值比例低于阈值的年份
-        valid_years = missing_by_year[missing_by_year < missing_threshold].index
-        if len(valid_years) > 0:
-            start_year = country_data.loc[valid_years[0], 'year']
-            country_start_years[country] = start_year
+        # 找到第一个连续5年缺失值比例都低于阈值的年份
+        window_size = 5
+        valid_years = []
+        
+        for i in range(len(country_data) - window_size + 1):
+            window_missing = missing_by_year.iloc[i:i+window_size]
+            if all(window_missing < missing_threshold):
+                valid_years.append(country_data.iloc[i]['year'])
+                break
+        
+        if valid_years:
+            country_start_years[country] = valid_years[0]
         else:
-            # 如果所有年份都超过阈值，使用数据中最早的年份
-            country_start_years[country] = country_data['year'].min()
+            # 如果找不到连续5年都满足条件的年份，删除该国家的所有数据
+            country_start_years[country] = None
     
     # 过滤数据
     filtered_data = []
     for country in df['country'].unique():
-        country_data = df[df['country'] == country].copy()
-        start_year = country_start_years[country]
-        filtered_country_data = country_data[country_data['year'] >= start_year]
-        filtered_data.append(filtered_country_data)
+        if country_start_years[country] is not None:
+            country_data = df[df['country'] == country].copy()
+            start_year = country_start_years[country]
+            filtered_country_data = country_data[country_data['year'] >= start_year]
+            filtered_data.append(filtered_country_data)
     
     # 合并所有过滤后的数据
     df_filtered = pd.concat(filtered_data, ignore_index=True)
@@ -95,8 +103,12 @@ def filter_early_missing_data(df, missing_threshold=0.3):
     print("\n数据过滤信息:")
     for country in df['country'].unique():
         original_years = df[df['country'] == country]['year'].nunique()
-        filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
-        print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years}")
+        if country_start_years[country] is not None:
+            filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
+            start_year = country_start_years[country]
+            print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years} (起始年份: {start_year})")
+        else:
+            print(f"{country}: 原始年份数 {original_years} -> 已删除 (未找到连续5年数据质量合格的起始年份)")
     
     return df_filtered
 
@@ -164,11 +176,11 @@ def analyze_data_quality(df):
     print(f"满足质量要求的国家数: {len(good_countries)}")
     print("\n被排除的国家及其原因:")
     excluded_countries = set(df['country'].unique()) - set(good_countries)
-    for country in excluded_countries:
-        print(f"\n{country}:")
-        for metric, threshold in quality_thresholds.items():
-            if quality_df.loc[country, metric] > threshold:
-                print(f"- {metric}: {quality_df.loc[country, metric]:.2f} (阈值: {threshold})")
+    # for country in excluded_countries:
+    #     print(f"\n{country}:")
+    #     for metric, threshold in quality_thresholds.items():
+    #         if quality_df.loc[country, metric] > threshold:
+    #             print(f"- {metric}: {quality_df.loc[country, metric]:.2f} (阈值: {threshold})")
     
     # 筛选数据
     df_filtered = df[df['country'].isin(good_countries)].copy()
