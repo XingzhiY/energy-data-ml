@@ -248,18 +248,56 @@ def load_and_prepare_data(file_path):
     df = analyze_data_quality(df)
     
     # 添加时序特征
+    # 1. 滞后项特征
     for i in range(1, 6):
         df[f'renewable_share_lag_{i}'] = df.groupby('country')['renewables_share_energy'].shift(i)
     
-    # 计算化石能源消费变化率
+    # 2. 移动平均特征
+    df['renewable_ma_3'] = df.groupby('country')['renewables_share_energy'].transform(
+        lambda x: x.rolling(window=3, min_periods=1).mean()
+    )
+    df['renewable_ma_5'] = df.groupby('country')['renewables_share_energy'].transform(
+        lambda x: x.rolling(window=5, min_periods=1).mean()
+    )
+    
+    # 3. 趋势特征
+    df['renewable_trend_3'] = df.groupby('country')['renewables_share_energy'].transform(
+        lambda x: x.diff(3)
+    )
+    df['renewable_trend_5'] = df.groupby('country')['renewables_share_energy'].transform(
+        lambda x: x.diff(5)
+    )
+    
+    # 4. 计算化石能源消费变化率
     df['fossil_cons_change_pct'] = df.groupby('country')['fossil_share_energy'].transform(
         lambda x: x.pct_change(fill_method=None)
     )
     
-    # 添加政策相关特征
+    # 5. 添加政策相关特征
     df['paris_agreement'] = (df['year'] >= 2015).astype(int)
+    df['years_since_paris'] = (df['year'] - 2015).clip(0)
+    df['policy_strength'] = df['paris_agreement'] * df['years_since_paris']
     
-    # 安全地计算年度变化率
+    # 6. 添加技术发展特征
+    df['renewable_tech_index'] = df['solar_share_elec'] + df['wind_share_elec']
+    df['tech_growth_rate'] = df.groupby('country')['renewable_tech_index'].transform(
+        lambda x: x.pct_change(fill_method=None)
+    )
+    
+    # 7. 添加经济结构特征
+    df['energy_intensity'] = df['energy_per_gdp'] * df['gdp']
+    df['energy_per_capita'] = df['energy_per_gdp'] * df['gdp'] / df['population']
+    
+    # 8. 添加交互特征
+    df['gdp_renewable_interaction'] = df['gdp'] * df['renewables_share_energy']
+    df['population_renewable_interaction'] = df['population'] * df['renewables_share_energy']
+    df['policy_economic_interaction'] = df['paris_agreement'] * df['gdp']
+    
+    # 9. 添加区域特征（使用ISO代码的前两位作为区域标识）
+    df['region'] = df['iso_code'].str[:2]
+    df['region_renewable_avg'] = df.groupby(['region', 'year'])['renewables_share_energy'].transform('mean')
+    
+    # 10. 添加可再生能源发展速度特征
     df['renewable_growth'] = df.groupby('country')['renewables_share_energy'].transform(
         lambda x: x.pct_change(fill_method=None)
     )
