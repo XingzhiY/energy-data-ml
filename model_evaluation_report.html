@@ -1,7 +1,7 @@
 
     <html>
     <head>
-        <title>可再生能源预测模型评估报告</title>
+        <title>Renewable Energy Prediction Model Evaluation Report</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             h1, h2 { color: #2c3e50; }
@@ -12,73 +12,73 @@
         </style>
     </head>
     <body>
-        <h1>可再生能源预测模型评估报告</h1>
+        <h1>Renewable Energy Prediction Model Evaluation Report</h1>
         
-        <h2>1. 基础模型信息</h2>
+        <h2>1. Basic Model Information</h2>
         <table>
-            <tr><th>指标</th><th>值</th></tr>
-            <tr><td>模型类型</td><td>随机森林回归</td></tr>
-            <tr><td>特征数量</td><td>36</td></tr>
-            <tr><td>训练样本数</td><td>2069</td></tr>
-            <tr><td>测试样本数</td><td>340</td></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Model Type</td><td>Random Forest Regression</td></tr>
+            <tr><td>Number of Features</td><td>36</td></tr>
+            <tr><td>Training Samples</td><td>2069</td></tr>
+            <tr><td>Test Samples</td><td>340</td></tr>
         </table>
 
-        <h2>2. 时间范围信息</h2>
+        <h2>2. Time Range Information</h2>
         <table>
-            <tr><th>数据集</th><th>开始年份</th><th>结束年份</th></tr>
+            <tr><th>Dataset</th><th>Start Year</th><th>End Year</th></tr>
             <tr>
-                <td>训练集</td>
+                <td>Training Set</td>
                 <td>1985</td>
                 <td>2018</td>
             </tr>
             <tr>
-                <td>测试集</td>
+                <td>Test Set</td>
                 <td>2019</td>
                 <td>2023</td>
             </tr>
         </table>
 
-        <h2>3. 模型性能指标</h2>
+        <h2>3. Model Performance Metrics</h2>
         <table>
-            <tr><th>指标</th><th>训练集</th><th>测试集</th></tr>
+            <tr><th>Metric</th><th>Training Set</th><th>Test Set</th></tr>
             <tr>
-                <td>R2分数</td>
+                <td>R2 Score</td>
                 <td>0.995</td>
                 <td>0.982</td>
             </tr>
             <tr>
-                <td>均方误差(MSE)</td>
+                <td>Mean Squared Error (MSE)</td>
                 <td>0.835</td>
                 <td>3.342</td>
             </tr>
             <tr>
-                <td>均方根误差(RMSE)</td>
+                <td>Root Mean Squared Error (RMSE)</td>
                 <td>0.914</td>
                 <td>1.828</td>
             </tr>
             <tr>
-                <td>平均绝对误差(MAE)</td>
+                <td>Mean Absolute Error (MAE)</td>
                 <td>0.612</td>
                 <td>1.128</td>
             </tr>
         </table>
 
-        <h2>4. 交叉验证结果</h2>
+        <h2>4. Cross Validation Results</h2>
         <table>
-            <tr><th>指标</th><th>值</th></tr>
-            <tr><td>平均R2分数</td><td>0.946</td></tr>
-            <tr><td>R2分数标准差</td><td>0.060</td></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Mean R2 Score</td><td>0.946</td></tr>
+            <tr><td>R2 Score Standard Deviation</td><td>0.060</td></tr>
         </table>
 
-        <h2>5. 特征重要性（Top 10）</h2>
+        <h2>5. Feature Importance (Top 10)</h2>
         <table>
-            <tr><th>特征</th><th>重要性</th></tr>
+            <tr><th>Feature</th><th>Importance</th></tr>
             <tr><td>renewable_ma_3</td><td>0.174</td></tr><tr><td>renewable_ma_5</td><td>0.153</td></tr><tr><td>renewable_share_lag_1</td><td>0.138</td></tr><tr><td>renewable_share_lag_2</td><td>0.093</td></tr><tr><td>renewable_share_lag_4</td><td>0.092</td></tr><tr><td>renewable_share_lag_5</td><td>0.090</td></tr><tr><td>region_renewable_avg</td><td>0.070</td></tr><tr><td>renewable_share_lag_3</td><td>0.061</td></tr><tr><td>renewables_elec_per_capita</td><td>0.037</td></tr><tr><td>low_carbon_share_energy</td><td>0.025</td></tr>
         </table>
 
-        <h2>6. 各国预测性能（Top 10）</h2>
+        <h2>6. Country Performance (Top 10)</h2>
         <table>
-            <tr><th>国家</th><th>R2分数</th></tr>
+            <tr><th>Country</th><th>R2 Score</th></tr>
             <tr><td>South Korea</td><td>0.975</td></tr><tr><td>South Africa</td><td>0.964</td></tr><tr><td>Australia</td><td>0.954</td></tr><tr><td>Romania</td><td>0.899</td></tr><tr><td>Japan</td><td>0.879</td></tr><tr><td>Greece</td><td>0.865</td></tr><tr><td>Lithuania</td><td>0.863</td></tr><tr><td>France</td><td>0.854</td></tr><tr><td>Taiwan</td><td>0.818</td></tr><tr><td>Spain</td><td>0.794</td></tr>
         </table>
     </body>

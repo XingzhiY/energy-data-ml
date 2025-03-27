@@ -1,7 +1,7 @@
 {
-    "基础模型信息": {
-        "模型类型": "随机森林回归",
-        "模型参数": {
+    "Basic Model Information": {
+        "Model Type": "Random Forest Regression",
+        "Model Parameters": {
             "bootstrap": true,
             "ccp_alpha": 0.0,
             "criterion": "squared_error",
@@ -21,39 +21,39 @@
             "verbose": 0,
             "warm_start": false
         },
-        "特征数量": 36,
-        "训练样本数": 2069,
-        "测试样本数": 340
+        "Number of Features": 36,
+        "Training Samples": 2069,
+        "Test Samples": 340
     },
-    "时间范围信息": {
-        "训练集": {
-            "开始年份": 1985,
-            "结束年份": 2018
+    "Time Range Information": {
+        "Training Set": {
+            "Start Year": 1985,
+            "End Year": 2018
         },
-        "测试集": {
-            "开始年份": 2019,
-            "结束年份": 2023
+        "Test Set": {
+            "Start Year": 2019,
+            "End Year": 2023
         }
     },
-    "整体模型性能": {
-        "训练集": {
-            "R2分数": 0.9951180794050543,
-            "均方误差(MSE)": 0.8352747795157627,
-            "均方根误差(RMSE)": 0.9139336844190409,
-            "平均绝对误差(MAE)": 0.6117375328936021
+    "Overall Model Performance": {
+        "Training Set": {
+            "R2 Score": 0.9951180794050543,
+            "Mean Squared Error (MSE)": 0.8352747795157628,
+            "Root Mean Squared Error (RMSE)": 0.9139336844190408,
+            "Mean Absolute Error (MAE)": 0.611737532893602
         },
-        "测试集": {
-            "R2分数": 0.9821666863538845,
-            "均方误差(MSE)": 3.342338415267923,
-            "均方根误差(RMSE)": 1.8282063382637967,
-            "平均绝对误差(MAE)": 1.1275090015389508
+        "Test Set": {
+            "R2 Score": 0.9821666863538845,
+            "Mean Squared Error (MSE)": 3.342338415267925,
+            "Root Mean Squared Error (RMSE)": 1.828206338263797,
+            "Mean Absolute Error (MAE)": 1.1275090015389506
         }
     },
-    "交叉验证结果": {
-        "折数": 5,
-        "平均R2分数": 0.9458006312223655,
-        "R2分数标准差": 0.05978995976983088,
-        "各折分数": [
+    "Cross Validation Results": {
+        "Number of Folds": 5,
+        "Mean R2 Score": 0.9458006312223655,
+        "R2 Score Standard Deviation": 0.05978995976983088,
+        "Fold Scores": [
             0.967884570792929,
             0.9812591453838435,
             0.8268603216332586,
@@ -61,7 +61,7 @@
             0.9834832628895627
         ]
     },
-    "特征重要性": {
+    "Feature Importance": {
         "gdp": 0.00029725698434762335,
         "population": 0.0016931853815269932,
         "fossil_share_energy": 0.017400418498835068,
@@ -99,7 +99,7 @@
         "region_renewable_avg": 0.06952113319046088,
         "renewable_growth": 0.00037333205904912777
     },
-    "各国预测性能": {
+    "Country Performance": {
         "Algeria": -43.74704456054335,
         "Argentina": 0.74677108299753,
         "Australia": 0.9539127654389388,
@@ -129,7 +129,7 @@
         "Indonesia": -0.6058062669369253,
         "Iran": -0.8499515992815496,
         "Ireland": -0.6250530747503995,
-        "Israel": 0.7021262415471254,
+        "Israel": 0.7021262415471251,
         "Italy": 0.5021991261960136,
         "Japan": 0.8788426651361195,
         "Kazakhstan": 0.7078106048660016,
@@ -141,7 +141,7 @@
         "Morocco": -2.0422237706578112,
         "Netherlands": 0.7312781607540129,
         "New Zealand": 0.27149967548862763,
-        "North Macedonia": 0.7428974005665385,
+        "North Macedonia": 0.7428974005665383,
         "Norway": -0.35715927304700634,
         "Pakistan": -0.5690651336299863,
         "Peru": 0.5850465310280084,

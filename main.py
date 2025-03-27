@@ -1,6 +1,6 @@
 """
-预测各国可再生能源占比的未来趋势
-使用随机森林回归模型，结合历史数据和社会经济指标
+Predict future trends of renewable energy shares in various countries
+Using Random Forest regression model with historical data and socioeconomic indicators
 """
 
 import pandas as pd
@@ -12,38 +12,34 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-# 设置matplotlib中文字体
-plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']  # Mac系统
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-
 def fill_missing_by_country(df, columns):
     """
-    按国家分别填充缺失值
+    Fill missing values by country
     
     Args:
-        df: 数据框
-        columns: 需要填充的列名列表
+        df: DataFrame
+        columns: List of column names to fill
     
     Returns:
-        填充后的数据框
+        DataFrame with filled values
     """
     df_filled = df.copy()
     
-    # 对每个国家分别处理
+    # Process each country
     for country in df['country'].unique():
         country_mask = df['country'] == country
         
-        # 对每个数值列进行处理
+        # Process each numeric column
         for col in columns:
-            # 获取该国家该列的数据
+            # Get data for this country and column
             country_data = df.loc[country_mask, col]
             
-            # 如果该国家有非空值，使用该国家的中位数填充
+            # If country has non-null values, fill with country median
             if not country_data.isna().all():
                 median_value = country_data.median()
                 df_filled.loc[country_mask, col] = country_data.fillna(median_value)
             else:
-                # 如果该国家所有值都是空的，使用全球中位数填充
+                # If all values are null, fill with global median
                 global_median = df[col].median()
                 df_filled.loc[country_mask, col] = global_median
     
@@ -51,28 +47,28 @@ def fill_missing_by_country(df, columns):
 
 def filter_early_missing_data(df, missing_threshold=0.3):
     """
-    过滤掉每个国家早期数据严重缺失的年份
+    Filter out years with severe missing data for each country
     
     Args:
-        df: 数据框
-        missing_threshold: 缺失值比例阈值，超过此阈值的年份将被过滤
+        df: DataFrame
+        missing_threshold: Missing value ratio threshold, years exceeding this will be filtered
     
     Returns:
-        过滤后的数据框
+        Filtered DataFrame
     """
-    # 获取所有数值列
+    # Get all numeric columns
     numeric_columns = df.select_dtypes(include=[np.number]).columns
     
-    # 存储每个国家的起始年份
+    # Store start year for each country
     country_start_years = {}
     
     for country in df['country'].unique():
         country_data = df[df['country'] == country].copy()
         
-        # 按年份计算缺失值比例
+        # Calculate missing ratio by year
         missing_by_year = country_data[numeric_columns].isna().mean(axis=1)
         
-        # 找到第一个连续5年缺失值比例都低于阈值的年份
+        # Find first year with 5 consecutive years below threshold
         window_size = 5
         valid_years = []
         
@@ -85,10 +81,10 @@ def filter_early_missing_data(df, missing_threshold=0.3):
         if valid_years:
             country_start_years[country] = valid_years[0]
         else:
-            # 如果找不到连续5年都满足条件的年份，删除该国家的所有数据
+            # If no 5 consecutive years found, remove all data for this country
             country_start_years[country] = None
     
-    # 过滤数据
+    # Filter data
     filtered_data = []
     for country in df['country'].unique():
         if country_start_years[country] is not None:
@@ -97,19 +93,8 @@ def filter_early_missing_data(df, missing_threshold=0.3):
             filtered_country_data = country_data[country_data['year'] >= start_year]
             filtered_data.append(filtered_country_data)
     
-    # 合并所有过滤后的数据
+    # Combine all filtered data
     df_filtered = pd.concat(filtered_data, ignore_index=True)
-    
-    # 输出过滤信息
-    # print("\n数据过滤信息:")
-    # for country in df['country'].unique():
-    #     original_years = df[df['country'] == country]['year'].nunique()
-    #     if country_start_years[country] is not None:
-    #         filtered_years = df_filtered[df_filtered['country'] == country]['year'].nunique()
-    #         start_year = country_start_years[country]
-    #         print(f"{country}: 原始年份数 {original_years} -> 过滤后年份数 {filtered_years} (起始年份: {start_year})")
-    #     else:
-    #         print(f"{country}: 原始年份数 {original_years} -> 已删除 (未找到连续5年数据质量合格的起始年份)")
     
     return df_filtered
 
@@ -347,97 +332,97 @@ def prepare_features(df):
 
 def train_model(df, test_years=5):
     """
-    训练随机森林模型，使用时间序列划分方法
+    Train random forest model using time series split
     
     Args:
-        df: 数据框
-        test_years: 用作测试的年份数量
+        df: DataFrame
+        test_years: Number of years to use for testing
     """
-    # 准备特征，排除非数值列
+    # Prepare features, exclude non-numeric columns
     feature_columns = [col for col in df.columns 
                       if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     
-    # 确保所有特征都是数值类型
+    # Ensure all features are numeric
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
     
-    # 按时间划分训练集和测试集
+    # Split by time
     cutoff_year = df['year'].max() - test_years
     
-    # 训练集：所有早于cutoff_year的数据
+    # Training set: all data before cutoff_year
     train_mask = df['year'] <= cutoff_year
-    # 测试集：所有晚于cutoff_year的数据
+    # Test set: all data after cutoff_year
     test_mask = df['year'] > cutoff_year
     
-    # 准备特征矩阵
+    # Prepare feature matrix
     X = df[numeric_features]
     y = df['renewables_share_energy']
     
-    # 确保没有无穷大值
+    # Ensure no infinity values
     X = X.replace([np.inf, -np.inf], np.nan)
     
-    # 按国家分别填充缺失值
+    # Fill missing values by country
     X = fill_missing_by_country(pd.concat([df[['country']], X], axis=1), numeric_features)[numeric_features]
     
-    # 划分训练集和测试集
+    # Split into training and test sets
     X_train = X[train_mask]
     X_test = X[test_mask]
     y_train = y[train_mask]
     y_test = y[test_mask]
     
-    # 输出训练集和测试集的时间范围
-    print(f"训练集时间范围：{df[train_mask]['year'].min()} - {df[train_mask]['year'].max()}")
-    print(f"测试集时间范围：{df[test_mask]['year'].min()} - {df[test_mask]['year'].max()}")
+    # Output training and test set time ranges
+    print(f"Training set time range: {df[train_mask]['year'].min()} - {df[train_mask]['year'].max()}")
+    print(f"Test set time range: {df[test_mask]['year'].min()} - {df[test_mask]['year'].max()}")
     
-    # 输出最终用于训练的数据
+    # Output final training data
     train_df = pd.concat([X_train, y_train], axis=1)
     test_df = pd.concat([X_test, y_test], axis=1)
     train_df.to_csv('6_data_train_time_series.csv', index=False)
     test_df.to_csv('7_data_test_time_series.csv', index=False)
-    print("最终用于训练的数据已保存到 6_data_train_time_series.csv 和 7_data_test_time_series.csv")
+    print("Final training data has been saved to 6_data_train_time_series.csv and 7_data_test_time_series.csv")
     
-    # 训练模型
+    # Train model
     model = RandomForestRegressor(
         n_estimators=100,
-        max_depth=5,  # 降低树的深度，防止过拟合
-        min_samples_split=10,  # 增加分裂所需的最小样本数
-        min_samples_leaf=5,  # 增加叶节点所需的最小样本数
-        max_features='sqrt',  # 使用sqrt(n_features)个特征进行分裂
-        bootstrap=True,  # 使用bootstrap采样
+        max_depth=5,  # Reduce tree depth to prevent overfitting
+        min_samples_split=10,  # Increase minimum samples required for splitting
+        min_samples_leaf=5,  # Increase minimum samples required for leaf nodes
+        max_features='sqrt',  # Use sqrt(n_features) features for splitting
+        bootstrap=True,  # Use bootstrap sampling
         random_state=42,
         n_jobs=-1
     )
     
-    # 安全地训练模型
+    # Safely train model
     try:
         model.fit(X_train, y_train)
     except ValueError as e:
-        print("训练时出错：", e)
-        print("正在检查特征值范围...")
+        print("Error during training:", e)
+        print("Checking feature value ranges...")
         for col in X_train.columns:
-            print(f"{col}: 范围 [{X_train[col].min()}, {X_train[col].max()}]")
+            print(f"{col}: range [{X_train[col].min()}, {X_train[col].max()}]")
         raise
     
-    # 计算每个国家的预测性能
+    # Calculate prediction performance for each country
     countries = df['country'].unique()
     country_scores = {}
     
     for country in countries:
-        # 获取该国家在测试集中的数据
+        # Get country data from test set
         country_mask_test = (df['country'] == country) & test_mask
         country_test_data = df[country_mask_test]
         
-        # 确保该国家在测试集中有足够的数据点（至少3年）
+        # Ensure country has enough data points in test set (at least 3 years)
         if len(country_test_data) >= 3:
-            # 使用该国家在测试集中的数据进行预测
+            # Use country's test set data for prediction
             X_test_country = X[country_mask_test]
             y_test_country = y[country_mask_test]
             
-            # 计算该国家的R²分数
+            # Calculate country's R² score
             score = model.score(X_test_country, y_test_country)
             country_scores[country] = score
     
-    # 输出每个国家的预测性能
-    print("\n各国预测性能 (R² 分数):")
+    # Output each country's prediction performance
+    print("\nCountry prediction performance (R² scores):")
     for country, score in sorted(country_scores.items(), key=lambda x: x[1], reverse=True):
         print(f"{country}: {score:.3f}")
     
@@ -522,20 +507,20 @@ def evaluate_with_time_series_cv(df, n_splits=5):
     return cv_scores
 
 def analyze_feature_importance(model, feature_names):
-    """分析特征重要性"""
+    """Analyze feature importance"""
     importance = pd.DataFrame({
-        '特征': feature_names,
-        '重要性': model.feature_importances_
+        'Feature': feature_names,
+        'Importance': model.feature_importances_
     })
-    return importance.sort_values('重要性', ascending=False)
+    return importance.sort_values('Importance', ascending=False)
 
 def predict_future(model, df, country, years_to_predict=5):
-    """预测特定国家的未来趋势"""
-    # 获取该国家的最新数据
+    """Predict future trends for a specific country"""
+    # Get latest data for the country
     country_data = df[df['country'] == country].copy()
     latest_data = country_data.iloc[-1:].copy()
     
-    # 获取训练模型时使用的特征（数值类型特征）
+    # Get features used in model training (numeric features)
     feature_columns = [col for col in df.columns 
                       if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
@@ -543,17 +528,17 @@ def predict_future(model, df, country, years_to_predict=5):
     predictions = []
     current_data = latest_data.copy()
     
-    # 计算历史趋势
+    # Calculate historical trend
     historical_trend = country_data['renewables_share_energy'].pct_change().mean()
     
     for i in range(years_to_predict):
-        # 更新年份
+        # Update year
         current_data['year'] = current_data['year'] + 1
         
-        # 更新滞后特征
+        # Update lag features
         for j in range(5, 0, -1):
             if j == 1:
-                # 使用历史趋势来调整预测值
+                # Use historical trend to adjust prediction
                 if predictions:
                     current_data[f'renewable_share_lag_{j}'] = predictions[-1] * (1 + historical_trend)
                 else:
@@ -561,12 +546,12 @@ def predict_future(model, df, country, years_to_predict=5):
             else:
                 current_data[f'renewable_share_lag_{j}'] = current_data[f'renewable_share_lag_{j-1}']
         
-        # 预测
+        # Make prediction
         pred = model.predict(current_data[numeric_features])[0]
         
-        # 确保预测值在合理范围内
+        # Ensure prediction is within reasonable range
         last_value = predictions[-1] if predictions else current_data['renewables_share_energy'].values[0]
-        max_change = 0.1  # 最大允许变化率（10%）
+        max_change = 0.1  # Maximum allowed change rate (10%)
         pred = np.clip(pred, last_value * (1 - max_change), last_value * (1 + max_change))
         
         predictions.append(pred)
@@ -574,14 +559,14 @@ def predict_future(model, df, country, years_to_predict=5):
     return predictions
 
 def plot_predictions(country, historical_data, predictions, future_years):
-    """绘制预测结果图表"""
+    """Plot prediction results chart"""
     plt.figure(figsize=(12, 6))
     
-    # 绘制历史数据
+    # Plot historical data
     plt.plot(historical_data['year'], historical_data['renewables_share_energy'], 
              label='Historical Data', marker='o')
     
-    # 绘制预测数据
+    # Plot prediction data
     future_years = range(historical_data['year'].max() + 1, 
                         historical_data['year'].max() + len(predictions) + 1)
     plt.plot(future_years, predictions, label='Prediction', marker='s', linestyle='--')
@@ -595,41 +580,41 @@ def plot_predictions(country, historical_data, predictions, future_years):
     return plt
 
 def plot_test_predictions(model, df, country, test_mask):
-    """绘制测试集上的预测效果对比图"""
-    # 获取该国家在测试集上的数据
+    """Plot test set prediction comparison chart"""
+    # Get country data from test set
     country_mask = (df['country'] == country) & test_mask
     country_test_data = df[country_mask]
     
     if len(country_test_data) < 3:
         return None
     
-    # 准备特征
+    # Prepare features
     feature_columns = [col for col in df.columns 
                       if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
     
-    # 获取测试集上的预测值
+    # Get predictions for test set
     X_test_country = df[country_mask][numeric_features]
     y_true = df[country_mask]['renewables_share_energy']
     y_pred = model.predict(X_test_country)
     
-    # 创建图表
+    # Create chart
     plt.figure(figsize=(12, 6))
     
-    # 绘制实际值
+    # Plot actual values
     plt.plot(country_test_data['year'], y_true, 
-             label='实际值', marker='o', color='blue')
+             label='Actual', marker='o', color='blue')
     
-    # 绘制预测值
+    # Plot predicted values
     plt.plot(country_test_data['year'], y_pred, 
-             label='预测值', marker='s', color='red', linestyle='--')
+             label='Predicted', marker='s', color='red', linestyle='--')
     
-    # 计算R²分数
+    # Calculate R² score
     r2_score = model.score(X_test_country, y_true)
     
-    plt.title(f'{country} 测试集预测效果对比 (R² = {r2_score:.3f})')
-    plt.xlabel('年份')
-    plt.ylabel('可再生能源占比 (%)')
+    plt.title(f'{country} Test Set Prediction Comparison (R² = {r2_score:.3f})')
+    plt.xlabel('Year')
+    plt.ylabel('Renewable Energy Share (%)')
     plt.legend()
     plt.grid(True)
     
@@ -637,72 +622,72 @@ def plot_test_predictions(model, df, country, test_mask):
 
 def generate_model_report(model, df, X_train, X_test, y_train, y_test, country_scores, test_mask, cv_scores):
     """
-    生成详细的模型评估报告
+    Generate detailed model evaluation report
     """
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
     import json
     
     report = {
-        "基础模型信息": {
-            "模型类型": "随机森林回归",
-            "模型参数": model.get_params(),
-            "特征数量": X_train.shape[1],
-            "训练样本数": X_train.shape[0],
-            "测试样本数": X_test.shape[0]
+        "Basic Model Information": {
+            "Model Type": "Random Forest Regression",
+            "Model Parameters": model.get_params(),
+            "Number of Features": X_train.shape[1],
+            "Training Samples": X_train.shape[0],
+            "Test Samples": X_test.shape[0]
         },
         
-        "时间范围信息": {
-            "训练集": {
-                "开始年份": int(df[df['year'] <= df['year'].max() - 5]['year'].min()),
-                "结束年份": int(df[df['year'] <= df['year'].max() - 5]['year'].max())
+        "Time Range Information": {
+            "Training Set": {
+                "Start Year": int(df[df['year'] <= df['year'].max() - 5]['year'].min()),
+                "End Year": int(df[df['year'] <= df['year'].max() - 5]['year'].max())
             },
-            "测试集": {
-                "开始年份": int(df[df['year'] > df['year'].max() - 5]['year'].min()),
-                "结束年份": int(df[df['year'] > df['year'].max() - 5]['year'].max())
+            "Test Set": {
+                "Start Year": int(df[df['year'] > df['year'].max() - 5]['year'].min()),
+                "End Year": int(df[df['year'] > df['year'].max() - 5]['year'].max())
             }
         },
         
-        "整体模型性能": {
-            "训练集": {
-                "R2分数": float(model.score(X_train, y_train)),
-                "均方误差(MSE)": float(mean_squared_error(y_train, model.predict(X_train))),
-                "均方根误差(RMSE)": float(np.sqrt(mean_squared_error(y_train, model.predict(X_train)))),
-                "平均绝对误差(MAE)": float(mean_absolute_error(y_train, model.predict(X_train)))
+        "Overall Model Performance": {
+            "Training Set": {
+                "R2 Score": float(model.score(X_train, y_train)),
+                "Mean Squared Error (MSE)": float(mean_squared_error(y_train, model.predict(X_train))),
+                "Root Mean Squared Error (RMSE)": float(np.sqrt(mean_squared_error(y_train, model.predict(X_train)))),
+                "Mean Absolute Error (MAE)": float(mean_absolute_error(y_train, model.predict(X_train)))
             },
-            "测试集": {
-                "R2分数": float(model.score(X_test, y_test)),
-                "均方误差(MSE)": float(mean_squared_error(y_test, model.predict(X_test))),
-                "均方根误差(RMSE)": float(np.sqrt(mean_squared_error(y_test, model.predict(X_test)))),
-                "平均绝对误差(MAE)": float(mean_absolute_error(y_test, model.predict(X_test)))
+            "Test Set": {
+                "R2 Score": float(model.score(X_test, y_test)),
+                "Mean Squared Error (MSE)": float(mean_squared_error(y_test, model.predict(X_test))),
+                "Root Mean Squared Error (RMSE)": float(np.sqrt(mean_squared_error(y_test, model.predict(X_test)))),
+                "Mean Absolute Error (MAE)": float(mean_absolute_error(y_test, model.predict(X_test)))
             }
         },
         
-        "交叉验证结果": {
-            "折数": len(cv_scores),
-            "平均R2分数": float(np.mean(cv_scores)),
-            "R2分数标准差": float(np.std(cv_scores)),
-            "各折分数": [float(score) for score in cv_scores]
+        "Cross Validation Results": {
+            "Number of Folds": len(cv_scores),
+            "Mean R2 Score": float(np.mean(cv_scores)),
+            "R2 Score Standard Deviation": float(np.std(cv_scores)),
+            "Fold Scores": [float(score) for score in cv_scores]
         },
         
-        "特征重要性": {
+        "Feature Importance": {
             feature: float(importance) 
             for feature, importance in zip(X_train.columns, model.feature_importances_)
         },
         
-        "各国预测性能": {
+        "Country Performance": {
             country: float(score) for country, score in country_scores.items()
         }
     }
     
-    # 保存报告为JSON文件
+    # Save report as JSON file
     with open('model_evaluation_report.json', 'w', encoding='utf-8') as f:
         json.dump(report, f, ensure_ascii=False, indent=4)
     
-    # 生成HTML报告
+    # Generate HTML report
     html_report = f"""
     <html>
     <head>
-        <title>可再生能源预测模型评估报告</title>
+        <title>Renewable Energy Prediction Model Evaluation Report</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 20px; }}
             h1, h2 {{ color: #2c3e50; }}
@@ -713,80 +698,80 @@ def generate_model_report(model, df, X_train, X_test, y_train, y_test, country_s
         </style>
     </head>
     <body>
-        <h1>可再生能源预测模型评估报告</h1>
+        <h1>Renewable Energy Prediction Model Evaluation Report</h1>
         
-        <h2>1. 基础模型信息</h2>
+        <h2>1. Basic Model Information</h2>
         <table>
-            <tr><th>指标</th><th>值</th></tr>
-            <tr><td>模型类型</td><td>随机森林回归</td></tr>
-            <tr><td>特征数量</td><td>{X_train.shape[1]}</td></tr>
-            <tr><td>训练样本数</td><td>{X_train.shape[0]}</td></tr>
-            <tr><td>测试样本数</td><td>{X_test.shape[0]}</td></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Model Type</td><td>Random Forest Regression</td></tr>
+            <tr><td>Number of Features</td><td>{X_train.shape[1]}</td></tr>
+            <tr><td>Training Samples</td><td>{X_train.shape[0]}</td></tr>
+            <tr><td>Test Samples</td><td>{X_test.shape[0]}</td></tr>
         </table>
 
-        <h2>2. 时间范围信息</h2>
+        <h2>2. Time Range Information</h2>
         <table>
-            <tr><th>数据集</th><th>开始年份</th><th>结束年份</th></tr>
+            <tr><th>Dataset</th><th>Start Year</th><th>End Year</th></tr>
             <tr>
-                <td>训练集</td>
-                <td>{report['时间范围信息']['训练集']['开始年份']}</td>
-                <td>{report['时间范围信息']['训练集']['结束年份']}</td>
+                <td>Training Set</td>
+                <td>{report['Time Range Information']['Training Set']['Start Year']}</td>
+                <td>{report['Time Range Information']['Training Set']['End Year']}</td>
             </tr>
             <tr>
-                <td>测试集</td>
-                <td>{report['时间范围信息']['测试集']['开始年份']}</td>
-                <td>{report['时间范围信息']['测试集']['结束年份']}</td>
-            </tr>
-        </table>
-
-        <h2>3. 模型性能指标</h2>
-        <table>
-            <tr><th>指标</th><th>训练集</th><th>测试集</th></tr>
-            <tr>
-                <td>R2分数</td>
-                <td>{report['整体模型性能']['训练集']['R2分数']:.3f}</td>
-                <td>{report['整体模型性能']['测试集']['R2分数']:.3f}</td>
-            </tr>
-            <tr>
-                <td>均方误差(MSE)</td>
-                <td>{report['整体模型性能']['训练集']['均方误差(MSE)']:.3f}</td>
-                <td>{report['整体模型性能']['测试集']['均方误差(MSE)']:.3f}</td>
-            </tr>
-            <tr>
-                <td>均方根误差(RMSE)</td>
-                <td>{report['整体模型性能']['训练集']['均方根误差(RMSE)']:.3f}</td>
-                <td>{report['整体模型性能']['测试集']['均方根误差(RMSE)']:.3f}</td>
-            </tr>
-            <tr>
-                <td>平均绝对误差(MAE)</td>
-                <td>{report['整体模型性能']['训练集']['平均绝对误差(MAE)']:.3f}</td>
-                <td>{report['整体模型性能']['测试集']['平均绝对误差(MAE)']:.3f}</td>
+                <td>Test Set</td>
+                <td>{report['Time Range Information']['Test Set']['Start Year']}</td>
+                <td>{report['Time Range Information']['Test Set']['End Year']}</td>
             </tr>
         </table>
 
-        <h2>4. 交叉验证结果</h2>
+        <h2>3. Model Performance Metrics</h2>
         <table>
-            <tr><th>指标</th><th>值</th></tr>
-            <tr><td>平均R2分数</td><td>{report['交叉验证结果']['平均R2分数']:.3f}</td></tr>
-            <tr><td>R2分数标准差</td><td>{report['交叉验证结果']['R2分数标准差']:.3f}</td></tr>
+            <tr><th>Metric</th><th>Training Set</th><th>Test Set</th></tr>
+            <tr>
+                <td>R2 Score</td>
+                <td>{report['Overall Model Performance']['Training Set']['R2 Score']:.3f}</td>
+                <td>{report['Overall Model Performance']['Test Set']['R2 Score']:.3f}</td>
+            </tr>
+            <tr>
+                <td>Mean Squared Error (MSE)</td>
+                <td>{report['Overall Model Performance']['Training Set']['Mean Squared Error (MSE)']:.3f}</td>
+                <td>{report['Overall Model Performance']['Test Set']['Mean Squared Error (MSE)']:.3f}</td>
+            </tr>
+            <tr>
+                <td>Root Mean Squared Error (RMSE)</td>
+                <td>{report['Overall Model Performance']['Training Set']['Root Mean Squared Error (RMSE)']:.3f}</td>
+                <td>{report['Overall Model Performance']['Test Set']['Root Mean Squared Error (RMSE)']:.3f}</td>
+            </tr>
+            <tr>
+                <td>Mean Absolute Error (MAE)</td>
+                <td>{report['Overall Model Performance']['Training Set']['Mean Absolute Error (MAE)']:.3f}</td>
+                <td>{report['Overall Model Performance']['Test Set']['Mean Absolute Error (MAE)']:.3f}</td>
+            </tr>
         </table>
 
-        <h2>5. 特征重要性（Top 10）</h2>
+        <h2>4. Cross Validation Results</h2>
         <table>
-            <tr><th>特征</th><th>重要性</th></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Mean R2 Score</td><td>{report['Cross Validation Results']['Mean R2 Score']:.3f}</td></tr>
+            <tr><td>R2 Score Standard Deviation</td><td>{report['Cross Validation Results']['R2 Score Standard Deviation']:.3f}</td></tr>
+        </table>
+
+        <h2>5. Feature Importance (Top 10)</h2>
+        <table>
+            <tr><th>Feature</th><th>Importance</th></tr>
             {
                 ''.join([f"<tr><td>{feature}</td><td>{importance:.3f}</td></tr>"
-                        for feature, importance in sorted(report['特征重要性'].items(),
+                        for feature, importance in sorted(report['Feature Importance'].items(),
                                                       key=lambda x: x[1], reverse=True)[:10]])
             }
         </table>
 
-        <h2>6. 各国预测性能（Top 10）</h2>
+        <h2>6. Country Performance (Top 10)</h2>
         <table>
-            <tr><th>国家</th><th>R2分数</th></tr>
+            <tr><th>Country</th><th>R2 Score</th></tr>
             {
                 ''.join([f"<tr><td>{country}</td><td>{score:.3f}</td></tr>"
-                        for country, score in sorted(report['各国预测性能'].items(),
+                        for country, score in sorted(report['Country Performance'].items(),
                                                  key=lambda x: x[1], reverse=True)[:10]])
             }
         </table>
@@ -794,55 +779,55 @@ def generate_model_report(model, df, X_train, X_test, y_train, y_test, country_s
     </html>
     """
     
-    # 保存HTML报告
+    # Save HTML report
     with open('model_evaluation_report.html', 'w', encoding='utf-8') as f:
         f.write(html_report)
     
     return report
 
 def main():
-    # 加载数据
+    # Load data
     df = load_and_prepare_data('owid-energy-data.csv')
     
-    # 分析数据质量并筛选国家
-    print("\n开始数据质量分析...")
+    # Analyze data quality and filter countries
+    print("\nStarting data quality analysis...")
     df = analyze_data_quality(df)
     
-    # 特征工程
+    # Feature engineering
     df = prepare_features(df)
     
-    # 使用时间序列交叉验证评估模型
-    print("\n执行时间序列交叉验证...")
+    # Evaluate model using time series cross validation
+    print("\nPerforming time series cross validation...")
     cv_scores = evaluate_with_time_series_cv(df)
     
-    # 训练最终模型
-    print("\n训练最终模型...")
+    # Train final model
+    print("\nTraining final model...")
     model, X_train, X_test, y_train, y_test, country_scores, test_mask = train_model(df, test_years=5)
     
-    # 生成模型评估报告
-    print("\n生成模型评估报告...")
+    # Generate model evaluation report
+    print("\nGenerating model evaluation report...")
     report = generate_model_report(model, df, X_train, X_test, y_train, y_test, country_scores, test_mask, cv_scores)
-    print("模型评估报告已保存到 model_evaluation_report.json 和 model_evaluation_report.html")
+    print("Model evaluation report has been saved to model_evaluation_report.json and model_evaluation_report.html")
     
-    # 获取R²分数最高的五个国家
+    # Get top 5 countries by R² score
     top_countries = sorted(country_scores.items(), key=lambda x: x[1], reverse=True)[:5]
     
-    # 为R²分数最高的五个国家绘制测试集预测效果对比图
-    print("\n绘制测试集预测效果对比图...")
+    # Plot test set prediction comparison for top 5 countries
+    print("\nPlotting test set prediction comparisons...")
     for country, score in top_countries:
         plt = plot_test_predictions(model, df, country, test_mask)
         if plt is not None:
             plt.savefig(f'test_prediction_{country}.png')
             plt.close()
     
-    # 为R²分数最高的五个国家进行未来预测
+    # Make future predictions for top 5 countries
     for country, score in top_countries:
         predictions = predict_future(model, df, country, years_to_predict=10)
         historical_data = df[df['country'] == country]
         
-        print(f"\n{country}未来10年可再生能源占比预测:")
+        print(f"\n{country} renewable energy share predictions for next 10 years:")
         for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
-            print(f"{year}年: {pred:.2f}%")
+            print(f"Year {year}: {pred:.2f}%")
         
         # 绘制预测图表
         plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
