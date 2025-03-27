@@ -1,12 +1,12 @@
 import pandas as pd
 
-# Load data
+# 加载数据
 df = pd.read_csv('owid-energy-data.csv')
 
-# Display all column names
-print("All columns in the dataset:")
+# 显示所有列名
+print("数据集中的所有列：")
 print(df.columns.tolist())
 
-# Display basic dataset information
-print("\nBasic dataset information:")
+# 显示数据的基本信息
+print("\n数据集基本信息：")
 print(df.info())

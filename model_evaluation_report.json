@@ -38,14 +38,14 @@
     "Overall Model Performance": {
         "Training Set": {
             "R2 Score": 0.9951180794050543,
-            "Mean Squared Error (MSE)": 0.8352747795157628,
+            "Mean Squared Error (MSE)": 0.8352747795157629,
             "Root Mean Squared Error (RMSE)": 0.9139336844190408,
             "Mean Absolute Error (MAE)": 0.611737532893602
         },
         "Test Set": {
             "R2 Score": 0.9821666863538845,
-            "Mean Squared Error (MSE)": 3.342338415267925,
-            "Root Mean Squared Error (RMSE)": 1.828206338263797,
+            "Mean Squared Error (MSE)": 3.3423384152679216,
+            "Root Mean Squared Error (RMSE)": 1.828206338263798,
             "Mean Absolute Error (MAE)": 1.1275090015389506
         }
     },
@@ -100,7 +100,7 @@
         "renewable_growth": 0.00037333205904912777
     },
     "Country Performance": {
-        "Algeria": -43.74704456054335,
+        "Algeria": -43.747044560543344,
         "Argentina": 0.74677108299753,
         "Australia": 0.9539127654389388,
         "Austria": -2.6224241630270626,
@@ -141,21 +141,21 @@
         "Morocco": -2.0422237706578112,
         "Netherlands": 0.7312781607540129,
         "New Zealand": 0.27149967548862763,
-        "North Macedonia": 0.7428974005665383,
+        "North Macedonia": 0.7428974005665385,
         "Norway": -0.35715927304700634,
         "Pakistan": -0.5690651336299863,
         "Peru": 0.5850465310280084,
         "Philippines": -0.609366169603883,
         "Poland": 0.6379428664930603,
-        "Portugal": 0.4492085689752976,
+        "Portugal": 0.4492085689752984,
         "Romania": 0.8987401442634264,
         "Russia": 0.0841123470019064,
         "Slovakia": -4.851861183780365,
         "Slovenia": 0.4627745281126232,
         "South Africa": 0.963899562083903,
         "South Korea": 0.9753410299586455,
-        "Spain": 0.7942083515233255,
-        "Sweden": -5.583137362165014,
+        "Spain": 0.7942083515233258,
+        "Sweden": -5.583137362165008,
         "Switzerland": -1.4760508837001654,
         "Taiwan": 0.817762321848671,
         "Thailand": -5.737776570450785,
