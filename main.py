@@ -302,51 +302,226 @@ def load_and_prepare_data(file_path):
         lambda x: x.pct_change(fill_method=None)
     )
     
+    # 11. 添加分组特征
+    # 计算每个国家的平均GDP和人均GDP
+    country_stats = df.groupby('country').agg({
+        'gdp': 'mean',
+        'population': 'mean'
+    }).reset_index()
+    
+    # 计算人均GDP
+    country_stats['gdp_per_capita'] = country_stats['gdp'] / country_stats['population']
+    
+    # 计算GDP和人均GDP的分位数
+    gdp_median = country_stats['gdp'].median()
+    gdp_per_capita_median = country_stats['gdp_per_capita'].median()
+    
+    # 计算每个国家的平均能源结构
+    energy_stats = df.groupby('country').agg({
+        'fossil_share_energy': 'mean',
+        'renewables_share_energy': 'mean'
+    }).reset_index()
+    
+    # 计算化石能源和可再生能源占比的分位数
+    fossil_median = energy_stats['fossil_share_energy'].median()
+    renewable_median = energy_stats['renewables_share_energy'].median()
+    
+    # 创建分组
+    country_stats['economic_group'] = country_stats.apply(
+        lambda x: 'high_income' if x['gdp_per_capita'] > gdp_per_capita_median else 'low_income',
+        axis=1
+    )
+    
+    energy_stats['energy_group'] = energy_stats.apply(
+        lambda x: 'renewable_leading' if x['renewables_share_energy'] > renewable_median else 'fossil_dependent',
+        axis=1
+    )
+    
+    # 将分组信息合并回主数据框
+    df = df.merge(country_stats[['country', 'economic_group']], on='country', how='left')
+    df = df.merge(energy_stats[['country', 'energy_group']], on='country', how='left')
+    
+    # 创建组合分组
+    df['combined_group'] = df['economic_group'] + '_' + df['energy_group']
+    
+    # 输出分组统计信息
+    print("\n分组统计信息:")
+    print("\n经济发展水平分组:")
+    print(df['economic_group'].value_counts())
+    print("\n能源结构分组:")
+    print(df['energy_group'].value_counts())
+    print("\n组合分组:")
+    print(df['combined_group'].value_counts())
+    
     return df
 
+class FeatureProcessor:
+    """特征处理器类，用于管理特征工程过程"""
+    def __init__(self):
+        self.scalers = {}  # 存储每个特征的标准化器
+        self.feature_stats = {}  # 存储特征统计信息
+        self.feature_bounds = {}  # 存储特征边界值
+    
+    def fit(self, df, numeric_columns):
+        """
+        拟合数据，计算必要的统计信息
+        
+        Args:
+            df: 数据框
+            numeric_columns: 数值类型列名列表
+        """
+        self.numeric_columns = numeric_columns
+        
+        # 计算并存储每个特征的统计信息
+        for col in numeric_columns:
+            # 计算基本统计量
+            stats = df[col].describe()
+            self.feature_stats[col] = {
+                'mean': stats['mean'],
+                'std': stats['std'],
+                'min': stats['min'],
+                'max': stats['max'],
+                'median': df[col].median()
+            }
+            
+            # 根据特征分布确定异常值边界
+            # 使用Tukey方法计算边界
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            
+            # 存储边界值
+            self.feature_bounds[col] = {
+                'lower': lower_bound,
+                'upper': upper_bound
+            }
+            
+            # 创建并拟合标准化器
+            scaler = StandardScaler()
+            # 使用非异常值来拟合标准化器
+            valid_data = df[col][(df[col] >= lower_bound) & (df[col] <= upper_bound)]
+            if len(valid_data) > 0:  # 确保有足够的有效数据
+                scaler.fit(valid_data.values.reshape(-1, 1))
+                self.scalers[col] = scaler
+    
+    def transform(self, df):
+        """
+        转换数据
+        
+        Args:
+            df: 数据框
+        
+        Returns:
+            转换后的数据框
+        """
+        df_transformed = df.copy()
+        
+        # 1. 处理缺失值
+        df_transformed = self._handle_missing_values(df_transformed)
+        
+        # 2. 处理异常值
+        df_transformed = self._handle_outliers(df_transformed)
+        
+        # 3. 标准化
+        df_transformed = self._standardize(df_transformed)
+        
+        return df_transformed
+    
+    def _handle_missing_values(self, df):
+        """处理缺失值"""
+        df_filled = df.copy()
+        
+        for col in self.numeric_columns:
+            # 对每个国家分别处理
+            for country in df['country'].unique():
+                country_mask = df['country'] == country
+                country_data = df.loc[country_mask, col]
+                
+                if not country_data.isna().all():
+                    # 使用该国家的中位数填充
+                    median_value = country_data.median()
+                    df_filled.loc[country_mask, col] = country_data.fillna(median_value)
+                else:
+                    # 使用全局中位数填充
+                    df_filled.loc[country_mask, col] = df_filled[col].fillna(self.feature_stats[col]['median'])
+        
+        return df_filled
+    
+    def _handle_outliers(self, df):
+        """处理异常值"""
+        df_cleaned = df.copy()
+        
+        for col in self.numeric_columns:
+            bounds = self.feature_bounds[col]
+            # 使用边界值进行截断
+            df_cleaned[col] = df_cleaned[col].clip(bounds['lower'], bounds['upper'])
+        
+        return df_cleaned
+    
+    def _standardize(self, df):
+        """标准化数据"""
+        df_scaled = df.copy()
+        
+        for col in self.numeric_columns:
+            if col in self.scalers:
+                # 使用已经拟合的标准化器进行转换
+                df_scaled[col] = self.scalers[col].transform(df_scaled[col].values.reshape(-1, 1)).ravel()
+        
+        return df_scaled
+    
+    def save(self, filepath):
+        """保存特征处理器的状态"""
+        import joblib
+        joblib.dump(self, filepath)
+    
+    @classmethod
+    def load(cls, filepath):
+        """加载特征处理器的状态"""
+        import joblib
+        return joblib.load(filepath)
+
 def prepare_features(df):
-    """特征工程"""
+    """
+    特征工程
+    
+    Args:
+        df: 数据框
+    
+    Returns:
+        转换后的数据框和特征处理器
+    """
     # 获取所有数值列
     numeric_columns = df.select_dtypes(include=[np.number]).columns
     
-    # 按国家分别填充缺失值
-    df = fill_missing_by_country(df, numeric_columns)
+    # 创建并拟合特征处理器
+    processor = FeatureProcessor()
+    processor.fit(df, numeric_columns)
     
-    # 标准化数值特征前检查无穷大值
-    numeric_features = [
-        'gdp', 'population', 
-        'carbon_intensity_elec', 'greenhouse_gas_emissions',
-        'electricity_demand_per_capita', 'renewables_elec_per_capita',
-        'energy_per_gdp',
-        'fossil_cons_change_pct'
-    ]
+    # 转换数据
+    df_transformed = processor.transform(df)
     
-    # 只选择存在的特征
-    numeric_features = [f for f in numeric_features if f in df.columns]
+    # 保存特征处理器
+    processor.save('feature_processor.joblib')
     
-    # 将极端值限制在合理范围内（使用分位数）
-    for feature in numeric_features:
-        q1 = df[feature].quantile(0.01)
-        q3 = df[feature].quantile(0.99)
-        df[feature] = df[feature].clip(q1, q3)
+    # 保存处理后的数据
+    df_transformed.to_csv('data_processed.csv', index=False)
     
-    # 输出处理极端值后的数据
-    df.to_csv('3_data_after_outlier_handling.csv', index=False)
-    print("处理极端值后的数据已保存到 3_data_after_outlier_handling.csv")
+    # 输出数据处理报告
+    print("\n数据处理报告:")
+    for col in numeric_columns:
+        print(f"\n特征 {col}:")
+        print(f"原始数据范围: [{df[col].min():.2f}, {df[col].max():.2f}]")
+        print(f"处理后数据范围: [{df_transformed[col].min():.2f}, {df_transformed[col].max():.2f}]")
+        print(f"缺失值比例: {df[col].isna().mean():.2%}")
+        print(f"异常值边界: [{processor.feature_bounds[col]['lower']:.2f}, {processor.feature_bounds[col]['upper']:.2f}]")
     
-    # 标准化
-    scaler = StandardScaler()
-    df[numeric_features] = scaler.fit_transform(df[numeric_features])
-    
-    # 输出标准化后的数据
-    df.to_csv('4_data_after_scaling.csv', index=False)
-    print("标准化后的数据已保存到 4_data_after_scaling.csv")
-    
-    return df
+    return df_transformed, processor
 
 def train_model(df, test_years=5):
     """
-    训练随机森林模型，使用时间序列划分方法
+    训练随机森林模型，使用时间序列划分方法，支持分组训练
     
     Args:
         df: 数据框
@@ -354,67 +529,110 @@ def train_model(df, test_years=5):
     """
     # 准备特征，排除非数值列
     feature_columns = [col for col in df.columns 
-                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code']]
+                      if col not in ['country', 'year', 'renewables_share_energy', 'iso_code',
+                                   'economic_group', 'energy_group', 'combined_group']]
     
     # 确保所有特征都是数值类型
     numeric_features = df[feature_columns].select_dtypes(include=[np.number]).columns
     
-    # 按时间划分训练集和测试集
-    cutoff_year = df['year'].max() - test_years
+    # 为每个分组训练单独的模型
+    models = {}
+    group_scores = {}
     
-    # 训练集：所有早于cutoff_year的数据
-    train_mask = df['year'] <= cutoff_year
-    # 测试集：所有晚于cutoff_year的数据
+    # 创建全局的测试集掩码
+    cutoff_year = df['year'].max() - test_years
     test_mask = df['year'] > cutoff_year
     
-    # 准备特征矩阵
-    X = df[numeric_features]
-    y = df['renewables_share_energy']
-    
-    # 确保没有无穷大值
-    X = X.replace([np.inf, -np.inf], np.nan)
-    
-    # 按国家分别填充缺失值
-    X = fill_missing_by_country(pd.concat([df[['country']], X], axis=1), numeric_features)[numeric_features]
-    
-    # 划分训练集和测试集
-    X_train = X[train_mask]
-    X_test = X[test_mask]
-    y_train = y[train_mask]
-    y_test = y[test_mask]
-    
-    # 输出训练集和测试集的时间范围
-    print(f"训练集时间范围：{df[train_mask]['year'].min()} - {df[train_mask]['year'].max()}")
-    print(f"测试集时间范围：{df[test_mask]['year'].min()} - {df[test_mask]['year'].max()}")
-    
-    # 输出最终用于训练的数据
-    train_df = pd.concat([X_train, y_train], axis=1)
-    test_df = pd.concat([X_test, y_test], axis=1)
-    train_df.to_csv('6_data_train_time_series.csv', index=False)
-    test_df.to_csv('7_data_test_time_series.csv', index=False)
-    print("最终用于训练的数据已保存到 6_data_train_time_series.csv 和 7_data_test_time_series.csv")
-    
-    # 训练模型
-    model = RandomForestRegressor(
-        n_estimators=100,
-        max_depth=5,  # 降低树的深度，防止过拟合
-        min_samples_split=10,  # 增加分裂所需的最小样本数
-        min_samples_leaf=5,  # 增加叶节点所需的最小样本数
-        max_features='sqrt',  # 使用sqrt(n_features)个特征进行分裂
-        bootstrap=True,  # 使用bootstrap采样
-        random_state=42,
-        n_jobs=-1
-    )
-    
-    # 安全地训练模型
-    try:
-        model.fit(X_train, y_train)
-    except ValueError as e:
-        print("训练时出错：", e)
-        print("正在检查特征值范围...")
-        for col in X_train.columns:
-            print(f"{col}: 范围 [{X_train[col].min()}, {X_train[col].max()}]")
-        raise
+    for group in df['combined_group'].unique():
+        print(f"\n训练 {group} 组的模型...")
+        
+        # 获取该组的所有国家
+        group_countries = df[df['combined_group'] == group]['country'].unique()
+        
+        # 存储每个国家的训练和测试数据
+        X_train_group = []
+        X_test_group = []
+        y_train_group = []
+        y_test_group = []
+        
+        # 对每个国家分别处理
+        for country in group_countries:
+            country_data = df[df['country'] == country].copy()
+            
+            # 按时间排序
+            country_data = country_data.sort_values('year')
+            
+            # 划分训练集和测试集
+            cutoff_year = country_data['year'].max() - test_years
+            train_data = country_data[country_data['year'] <= cutoff_year]
+            test_data = country_data[country_data['year'] > cutoff_year]
+            
+            if len(train_data) > 0 and len(test_data) > 0:
+                # 准备特征矩阵
+                X_train_country = train_data[numeric_features]
+                X_test_country = test_data[numeric_features]
+                y_train_country = train_data['renewables_share_energy']
+                y_test_country = test_data['renewables_share_energy']
+                
+                # 确保没有无穷大值
+                X_train_country = X_train_country.replace([np.inf, -np.inf], np.nan)
+                X_test_country = X_test_country.replace([np.inf, -np.inf], np.nan)
+                
+                # 填充缺失值
+                X_train_country = fill_missing_by_country(pd.concat([train_data[['country']], X_train_country], axis=1), numeric_features)[numeric_features]
+                X_test_country = fill_missing_by_country(pd.concat([test_data[['country']], X_test_country], axis=1), numeric_features)[numeric_features]
+                
+                # 添加到组数据中
+                X_train_group.append(X_train_country)
+                X_test_group.append(X_test_country)
+                y_train_group.append(y_train_country)
+                y_test_group.append(y_test_country)
+        
+        if len(X_train_group) > 0 and len(X_test_group) > 0:
+            # 合并所有国家的数据
+            X_train_group = pd.concat(X_train_group)
+            X_test_group = pd.concat(X_test_group)
+            y_train_group = pd.concat(y_train_group)
+            y_test_group = pd.concat(y_test_group)
+            
+            # 训练模型
+            model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=5,
+                min_samples_split=10,
+                min_samples_leaf=5,
+                max_features='sqrt',
+                bootstrap=True,
+                random_state=42,
+                n_jobs=-1
+            )
+            
+            try:
+                model.fit(X_train_group, y_train_group)
+                models[group] = model
+                
+                # 计算该组的性能
+                train_score = model.score(X_train_group, y_train_group)
+                test_score = model.score(X_test_group, y_test_group)
+                
+                group_scores[group] = {
+                    'train_score': train_score,
+                    'test_score': test_score,
+                    'n_countries': len(group_countries),
+                    'n_samples_train': len(X_train_group),
+                    'n_samples_test': len(X_test_group)
+                }
+                
+                print(f"{group} 组性能:")
+                print(f"国家数量: {len(group_countries)}")
+                print(f"训练集 R²: {train_score:.3f}")
+                print(f"测试集 R²: {test_score:.3f}")
+                print(f"训练样本数: {len(X_train_group)}")
+                print(f"测试样本数: {len(X_test_group)}")
+                
+            except Exception as e:
+                print(f"{group} 组训练失败: {str(e)}")
+                continue
     
     # 计算每个国家的预测性能
     countries = df['country'].unique()
@@ -422,25 +640,39 @@ def train_model(df, test_years=5):
     
     for country in countries:
         # 获取该国家在测试集中的数据
-        country_mask_test = (df['country'] == country) & test_mask
-        country_test_data = df[country_mask_test]
+        country_data = df[df['country'] == country].copy()
+        country_data = country_data.sort_values('year')
+        
+        # 划分训练集和测试集
+        cutoff_year = country_data['year'].max() - test_years
+        test_data = country_data[country_data['year'] > cutoff_year]
         
         # 确保该国家在测试集中有足够的数据点（至少3年）
-        if len(country_test_data) >= 3:
-            # 使用该国家在测试集中的数据进行预测
-            X_test_country = X[country_mask_test]
-            y_test_country = y[country_mask_test]
+        if len(test_data) >= 3:
+            # 获取该国家所属的组
+            country_group = test_data['combined_group'].iloc[0]
             
-            # 计算该国家的R²分数
-            score = model.score(X_test_country, y_test_country)
-            country_scores[country] = score
+            # 如果该组有对应的模型
+            if country_group in models:
+                # 准备测试数据
+                X_test_country = test_data[numeric_features]
+                X_test_country = X_test_country.replace([np.inf, -np.inf], np.nan)
+                X_test_country = fill_missing_by_country(pd.concat([test_data[['country']], X_test_country], axis=1), numeric_features)[numeric_features]
+                y_test_country = test_data['renewables_share_energy']
+                
+                # 使用对应组的模型进行预测
+                model = models[country_group]
+                
+                # 计算该国家的R²分数
+                score = model.score(X_test_country, y_test_country)
+                country_scores[country] = score
     
     # 输出每个国家的预测性能
     print("\n各国预测性能 (R² 分数):")
     for country, score in sorted(country_scores.items(), key=lambda x: x[1], reverse=True):
         print(f"{country}: {score:.3f}")
     
-    return model, X_train, X_test, y_train, y_test, country_scores, test_mask
+    return models, X_train_group, X_test_group, y_train_group, y_test_group, country_scores, test_mask, group_scores
 
 def evaluate_with_time_series_cv(df, n_splits=5):
     """
@@ -643,7 +875,7 @@ def main():
     df = analyze_data_quality(df)
     
     # 特征工程
-    df = prepare_features(df)
+    df, processor = prepare_features(df)
     
     # 使用时间序列交叉验证评估模型
     print("\n执行时间序列交叉验证...")
@@ -651,19 +883,17 @@ def main():
     
     # 训练最终模型
     print("\n训练最终模型...")
-    model, X_train, X_test, y_train, y_test, country_scores, test_mask = train_model(df, test_years=5)
+    models, X_train_group, X_test_group, y_train_group, y_test_group, country_scores, test_mask, group_scores = train_model(df, test_years=5)
     
     # 输出整体模型性能
-    train_score = model.score(X_train, y_train)
-    test_score = model.score(X_test, y_test)
-    print(f"\n整体模型性能:")
-    print(f"训练集 R2 分数: {train_score:.3f}")
-    print(f"测试集 R2 分数: {test_score:.3f}")
-    
-    # 分析特征重要性
-    importance = analyze_feature_importance(model, X_train.columns)
-    print("\n特征重要性:")
-    print(importance)
+    print("\n各分组模型性能:")
+    for group, scores in group_scores.items():
+        print(f"\n{group}组:")
+        print(f"国家数量: {scores['n_countries']}")
+        print(f"训练集 R²: {scores['train_score']:.3f}")
+        print(f"测试集 R²: {scores['test_score']:.3f}")
+        print(f"训练样本数: {scores['n_samples_train']}")
+        print(f"测试样本数: {scores['n_samples_test']}")
     
     # 获取R²分数最高的五个国家
     top_countries = sorted(country_scores.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -672,16 +902,17 @@ def main():
         print(f"{country}: {score:.3f}")
     
     # 为R²分数最高的五个国家绘制测试集预测效果对比图
-    print("\n绘制测试集预测效果对比图...")
+    print("\n绘制R²分数最高的五个国家的测试集预测效果对比图...")
     for country, score in top_countries:
-        plt = plot_test_predictions(model, df, country, test_mask)
+        plt = plot_test_predictions(models[df[df['country'] == country]['combined_group'].iloc[0]], df, country, test_mask)
         if plt is not None:
-            plt.savefig(f'test_prediction_{country}.png')
+            plt.savefig(f'test_prediction_top_{country}.png')
             plt.close()
     
     # 为R²分数最高的五个国家进行未来预测
     for country, score in top_countries:
-        predictions = predict_future(model, df, country, years_to_predict=10)
+        country_group = df[df['country'] == country]['combined_group'].iloc[0]
+        predictions = predict_future(models[country_group], df, country, years_to_predict=10)
         historical_data = df[df['country'] == country]
         
         print(f"\n{country}未来10年可再生能源占比预测:")
@@ -690,7 +921,36 @@ def main():
         
         # 绘制预测图表
         plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
-        plt.savefig(f'prediction_{country}.png')
+        plt.savefig(f'prediction_top_{country}.png')
+        plt.close()
+    
+    # 获取R²分数最差的五个国家
+    bottom_countries = sorted(country_scores.items(), key=lambda x: x[1])[:5]
+    print("\nR²分数最差的五个国家:")
+    for country, score in bottom_countries:
+        print(f"{country}: {score:.3f}")
+    
+    # 为R²分数最差的五个国家绘制测试集预测效果对比图
+    print("\n绘制R²分数最差的五个国家的测试集预测效果对比图...")
+    for country, score in bottom_countries:
+        plt = plot_test_predictions(models[df[df['country'] == country]['combined_group'].iloc[0]], df, country, test_mask)
+        if plt is not None:
+            plt.savefig(f'test_prediction_bottom_{country}.png')
+            plt.close()
+    
+    # 为R²分数最差的五个国家进行未来预测
+    for country, score in bottom_countries:
+        country_group = df[df['country'] == country]['combined_group'].iloc[0]
+        predictions = predict_future(models[country_group], df, country, years_to_predict=10)
+        historical_data = df[df['country'] == country]
+        
+        print(f"\n{country}未来10年可再生能源占比预测:")
+        for year, pred in enumerate(predictions, start=historical_data['year'].max() + 1):
+            print(f"{year}年: {pred:.2f}%")
+        
+        # 绘制预测图表
+        plt = plot_predictions(country, historical_data, predictions, range(len(predictions)))
+        plt.savefig(f'prediction_bottom_{country}.png')
         plt.close()
 
 if __name__ == "__main__":
