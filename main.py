@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 # 设置matplotlib中文字体
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']  # Mac系统
@@ -634,6 +635,171 @@ def plot_test_predictions(model, df, country, test_mask):
     
     return plt
 
+def generate_model_report(model, df, X_train, X_test, y_train, y_test, country_scores, test_mask, cv_scores):
+    """
+    生成详细的模型评估报告
+    """
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    import json
+    
+    report = {
+        "基础模型信息": {
+            "模型类型": "随机森林回归",
+            "模型参数": model.get_params(),
+            "特征数量": X_train.shape[1],
+            "训练样本数": X_train.shape[0],
+            "测试样本数": X_test.shape[0]
+        },
+        
+        "时间范围信息": {
+            "训练集": {
+                "开始年份": int(df[df['year'] <= df['year'].max() - 5]['year'].min()),
+                "结束年份": int(df[df['year'] <= df['year'].max() - 5]['year'].max())
+            },
+            "测试集": {
+                "开始年份": int(df[df['year'] > df['year'].max() - 5]['year'].min()),
+                "结束年份": int(df[df['year'] > df['year'].max() - 5]['year'].max())
+            }
+        },
+        
+        "整体模型性能": {
+            "训练集": {
+                "R2分数": float(model.score(X_train, y_train)),
+                "均方误差(MSE)": float(mean_squared_error(y_train, model.predict(X_train))),
+                "均方根误差(RMSE)": float(np.sqrt(mean_squared_error(y_train, model.predict(X_train)))),
+                "平均绝对误差(MAE)": float(mean_absolute_error(y_train, model.predict(X_train)))
+            },
+            "测试集": {
+                "R2分数": float(model.score(X_test, y_test)),
+                "均方误差(MSE)": float(mean_squared_error(y_test, model.predict(X_test))),
+                "均方根误差(RMSE)": float(np.sqrt(mean_squared_error(y_test, model.predict(X_test)))),
+                "平均绝对误差(MAE)": float(mean_absolute_error(y_test, model.predict(X_test)))
+            }
+        },
+        
+        "交叉验证结果": {
+            "折数": len(cv_scores),
+            "平均R2分数": float(np.mean(cv_scores)),
+            "R2分数标准差": float(np.std(cv_scores)),
+            "各折分数": [float(score) for score in cv_scores]
+        },
+        
+        "特征重要性": {
+            feature: float(importance) 
+            for feature, importance in zip(X_train.columns, model.feature_importances_)
+        },
+        
+        "各国预测性能": {
+            country: float(score) for country, score in country_scores.items()
+        }
+    }
+    
+    # 保存报告为JSON文件
+    with open('model_evaluation_report.json', 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=4)
+    
+    # 生成HTML报告
+    html_report = f"""
+    <html>
+    <head>
+        <title>可再生能源预测模型评估报告</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+            h1, h2 {{ color: #2c3e50; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+            th {{ background-color: #f5f5f5; }}
+            .metric {{ margin: 20px 0; }}
+        </style>
+    </head>
+    <body>
+        <h1>可再生能源预测模型评估报告</h1>
+        
+        <h2>1. 基础模型信息</h2>
+        <table>
+            <tr><th>指标</th><th>值</th></tr>
+            <tr><td>模型类型</td><td>随机森林回归</td></tr>
+            <tr><td>特征数量</td><td>{X_train.shape[1]}</td></tr>
+            <tr><td>训练样本数</td><td>{X_train.shape[0]}</td></tr>
+            <tr><td>测试样本数</td><td>{X_test.shape[0]}</td></tr>
+        </table>
+
+        <h2>2. 时间范围信息</h2>
+        <table>
+            <tr><th>数据集</th><th>开始年份</th><th>结束年份</th></tr>
+            <tr>
+                <td>训练集</td>
+                <td>{report['时间范围信息']['训练集']['开始年份']}</td>
+                <td>{report['时间范围信息']['训练集']['结束年份']}</td>
+            </tr>
+            <tr>
+                <td>测试集</td>
+                <td>{report['时间范围信息']['测试集']['开始年份']}</td>
+                <td>{report['时间范围信息']['测试集']['结束年份']}</td>
+            </tr>
+        </table>
+
+        <h2>3. 模型性能指标</h2>
+        <table>
+            <tr><th>指标</th><th>训练集</th><th>测试集</th></tr>
+            <tr>
+                <td>R2分数</td>
+                <td>{report['整体模型性能']['训练集']['R2分数']:.3f}</td>
+                <td>{report['整体模型性能']['测试集']['R2分数']:.3f}</td>
+            </tr>
+            <tr>
+                <td>均方误差(MSE)</td>
+                <td>{report['整体模型性能']['训练集']['均方误差(MSE)']:.3f}</td>
+                <td>{report['整体模型性能']['测试集']['均方误差(MSE)']:.3f}</td>
+            </tr>
+            <tr>
+                <td>均方根误差(RMSE)</td>
+                <td>{report['整体模型性能']['训练集']['均方根误差(RMSE)']:.3f}</td>
+                <td>{report['整体模型性能']['测试集']['均方根误差(RMSE)']:.3f}</td>
+            </tr>
+            <tr>
+                <td>平均绝对误差(MAE)</td>
+                <td>{report['整体模型性能']['训练集']['平均绝对误差(MAE)']:.3f}</td>
+                <td>{report['整体模型性能']['测试集']['平均绝对误差(MAE)']:.3f}</td>
+            </tr>
+        </table>
+
+        <h2>4. 交叉验证结果</h2>
+        <table>
+            <tr><th>指标</th><th>值</th></tr>
+            <tr><td>平均R2分数</td><td>{report['交叉验证结果']['平均R2分数']:.3f}</td></tr>
+            <tr><td>R2分数标准差</td><td>{report['交叉验证结果']['R2分数标准差']:.3f}</td></tr>
+        </table>
+
+        <h2>5. 特征重要性（Top 10）</h2>
+        <table>
+            <tr><th>特征</th><th>重要性</th></tr>
+            {
+                ''.join([f"<tr><td>{feature}</td><td>{importance:.3f}</td></tr>"
+                        for feature, importance in sorted(report['特征重要性'].items(),
+                                                      key=lambda x: x[1], reverse=True)[:10]])
+            }
+        </table>
+
+        <h2>6. 各国预测性能（Top 10）</h2>
+        <table>
+            <tr><th>国家</th><th>R2分数</th></tr>
+            {
+                ''.join([f"<tr><td>{country}</td><td>{score:.3f}</td></tr>"
+                        for country, score in sorted(report['各国预测性能'].items(),
+                                                 key=lambda x: x[1], reverse=True)[:10]])
+            }
+        </table>
+    </body>
+    </html>
+    """
+    
+    # 保存HTML报告
+    with open('model_evaluation_report.html', 'w', encoding='utf-8') as f:
+        f.write(html_report)
+    
+    return report
+
 def main():
     # 加载数据
     df = load_and_prepare_data('owid-energy-data.csv')
@@ -653,23 +819,13 @@ def main():
     print("\n训练最终模型...")
     model, X_train, X_test, y_train, y_test, country_scores, test_mask = train_model(df, test_years=5)
     
-    # 输出整体模型性能
-    train_score = model.score(X_train, y_train)
-    test_score = model.score(X_test, y_test)
-    print(f"\n整体模型性能:")
-    print(f"训练集 R2 分数: {train_score:.3f}")
-    print(f"测试集 R2 分数: {test_score:.3f}")
-    
-    # 分析特征重要性
-    importance = analyze_feature_importance(model, X_train.columns)
-    print("\n特征重要性:")
-    print(importance)
+    # 生成模型评估报告
+    print("\n生成模型评估报告...")
+    report = generate_model_report(model, df, X_train, X_test, y_train, y_test, country_scores, test_mask, cv_scores)
+    print("模型评估报告已保存到 model_evaluation_report.json 和 model_evaluation_report.html")
     
     # 获取R²分数最高的五个国家
     top_countries = sorted(country_scores.items(), key=lambda x: x[1], reverse=True)[:5]
-    print("\nR²分数最高的五个国家:")
-    for country, score in top_countries:
-        print(f"{country}: {score:.3f}")
     
     # 为R²分数最高的五个国家绘制测试集预测效果对比图
     print("\n绘制测试集预测效果对比图...")
